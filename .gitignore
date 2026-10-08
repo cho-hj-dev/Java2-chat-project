@@ -6,3 +6,12 @@ out
 
 # Java
 *.class
+bin/
+
+# Eclipse workspace
+.metadata/
+
+# Root Eclipse settings
+/.project
+/.classpath
+/.settings/
