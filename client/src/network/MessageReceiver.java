@@ -11,6 +11,9 @@ import java.io.IOException;
 import java.io.InputStreamReader;
 import java.net.Socket;
 
+import javax.swing.SwingUtilities;
+import view.frame.SignupFrame;
+
 public class MessageReceiver extends Thread {
 
     Socket socket;
@@ -64,6 +67,19 @@ public class MessageReceiver extends Thread {
         System.out.println(message);
 
         switch (type) {
+        case CHECK_ID:
+            String[] checkResult = message.split(",", 2);
+            if (checkResult.length == 2) {
+                SwingUtilities.invokeLater(() -> {
+                    SignupFrame frame = Application.signupFrame;
+                    if (frame != null) {
+                        frame.showCheckIdResult(
+                                checkResult[0], checkResult[1]);
+                    }
+                });
+            }
+            break;
+            
             case LOGIN:
                 InitResponse initRes = new InitResponse(message);
                 Application.chatRooms = initRes.getChatRooms();

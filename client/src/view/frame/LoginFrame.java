@@ -45,6 +45,14 @@ public class LoginFrame extends JFrame implements ActionListener {
         loginBtn.setBounds(150, 220, 300, 50);
         loginBtn.addActionListener(this);
         add(loginBtn);
+        
+        JButton signupBtn = new JButton("회원가입");
+        signupBtn.setBounds(150, 280, 300, 50);
+        signupBtn.addActionListener(e -> {
+            new SignupFrame(this);
+            setVisible(false);
+        });
+        add(signupBtn);
 
         setSize(600, 400);
         setVisible(true);

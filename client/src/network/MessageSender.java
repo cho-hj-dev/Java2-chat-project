@@ -21,6 +21,9 @@ public class MessageSender {
             PrintWriter writer = new PrintWriter(socket.getOutputStream(), true);
 
             switch (type) {
+            	case CHECK_ID:
+            		writer.println((CheckIdRequest) dto);
+            		break;
                 case LOGIN:
                     writer.println((LoginRequest) dto);
                     break;
