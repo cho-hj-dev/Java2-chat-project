@@ -2,6 +2,7 @@ package dto.type;
 
 public enum DtoType {
     LOGIN,
+    CHECK_ID,
 
     CREATE_CHAT,
     ENTER_CHAT, EXIT_CHAT,

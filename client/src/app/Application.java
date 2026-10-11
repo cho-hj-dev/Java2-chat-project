@@ -7,6 +7,7 @@ import network.MessageSender;
 import view.frame.LobbyFrame;
 import view.panel.ChatPanel;
 import view.panel.ChatRoomUserListPanel;
+import view.frame.SignupFrame;
 
 import java.net.Socket;
 import java.util.ArrayList;
@@ -23,6 +24,8 @@ public class Application {
     public static MessageReceiver receiver;
 
     public static LobbyFrame lobbyFrame;
+    
+    public static SignupFrame signupFrame;
 
     public static User me;
 

@@ -20,6 +20,9 @@ import java.io.PrintWriter;
 import java.net.Socket;
 import java.util.List;
 
+import dao.UserDao;
+import java.sql.SQLException;
+
 public class ServerThread extends Thread {
 
     Socket socket; // 담당자 (not 문지기)
@@ -71,6 +74,33 @@ public class ServerThread extends Thread {
     private void processReceiveMessage(DtoType type, String message)
             throws UserNotFoundException, ChatRoomNotFoundException, ChatRoomExistException, IOException {
         switch (type) {
+        case CHECK_ID: {
+            String loginId = message.trim();
+            CheckIdResponse.Status status;
+
+            if (!loginId.matches("[A-Za-z0-9_]{4,20}")) { // id는 영문, 숫자, 밑줄만 허용(4~20)
+                status = CheckIdResponse.Status.ERROR;
+            } else {
+                try {
+                    boolean exists = new UserDao()
+                            .findByLoginId(loginId)
+                            .isPresent();
+
+                    status = exists
+                            ? CheckIdResponse.Status.DUPLICATE
+                            : CheckIdResponse.Status.AVAILABLE;
+                } catch (SQLException e) {
+                    e.printStackTrace();
+                    status = CheckIdResponse.Status.ERROR;
+                }
+            }
+
+            PrintWriter writer =
+                    new PrintWriter(socket.getOutputStream(), true);
+            writer.println(new CheckIdResponse(loginId, status));
+            break;
+        }
+        
             case LOGIN:
                 // 사용자 추가
                 LoginRequest loginReq = new LoginRequest(message);
