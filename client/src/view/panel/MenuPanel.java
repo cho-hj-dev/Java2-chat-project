@@ -3,6 +3,7 @@ package view.panel;
 import app.Application;
 import dto.request.ExitChatRequest;
 import view.frame.LobbyFrame;
+import view.frame.ProfileFrame;
 
 import javax.swing.*;
 import java.awt.event.ActionEvent;
@@ -15,13 +16,16 @@ public class MenuPanel extends JPanel {
     JButton createChatBtn = new JButton("새로운 채팅방 생성");
 
     JButton exitBtn = new JButton("나가기");
+    
+    private final JButton profileBtn = new JButton("내 프로필");
+    private ProfileFrame profileFrame;
 
     public MenuPanel(JFrame frame, String chatRoomName) {
         setLayout(null);
 
         this.chatRoomName = chatRoomName;
 
-        createChatBtn.setBounds(15, 10, 370, 35);
+        createChatBtn.setBounds(15, 10, 240, 35);
         createChatBtn.addActionListener(new ActionListener() {
             @Override
             public void actionPerformed(ActionEvent e) {
@@ -49,6 +53,25 @@ public class MenuPanel extends JPanel {
         });
         add(exitBtn);
         createChatBtn.setVisible(false);
+        
+        profileBtn.setBounds(265, 10, 120, 35);
+        profileBtn.setVisible(false);
+
+        profileBtn.addActionListener(e -> {
+            if (Application.me == null) {
+                JOptionPane.showMessageDialog(frame, "로그인 후 이용하세요.");
+                return;
+            }
+
+            if (profileFrame == null || !profileFrame.isDisplayable()) {
+                profileFrame = new ProfileFrame(frame);
+            }
+
+            profileFrame.setVisible(true);
+            profileFrame.toFront();
+        });
+
+        add(profileBtn);
 
         frame.add(this);
 
@@ -58,6 +81,11 @@ public class MenuPanel extends JPanel {
 
     public void setCreateChatBtnVisible(boolean bool) {
         createChatBtn.setVisible(bool);
+        profileBtn.setVisible(bool);
+
+        if (bool) {
+            exitBtn.setVisible(false);
+        }
     }
 
     public void setExitBtnVisible(boolean bool) {

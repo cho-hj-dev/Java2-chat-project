@@ -12,6 +12,8 @@ import java.io.InputStreamReader;
 import java.net.Socket;
 
 import javax.swing.SwingUtilities;
+import java.nio.charset.StandardCharsets;
+import java.util.Base64;
 import view.frame.SignupFrame;
 
 public class MessageReceiver extends Thread {
@@ -24,62 +26,87 @@ public class MessageReceiver extends Thread {
 
     @Override
     public void run() {
-        super.run();
-
-        try {
-            while (true) {
-                BufferedReader reader = new BufferedReader(new InputStreamReader(socket.getInputStream()));
-                String str = reader.readLine();
-                if (str == null) {
-                    try {
-                        socket.close();
-                        System.out.println(Application.me.getName() + "'s socket is closed.");
-                    } catch(Exception e) {
-                        e.printStackTrace();
-                    }
-
-                    System.out.println("disconnect");
-                    System.exit(1);
-                }
-                System.out.println(str);
-                String[] token = str.split(":");
+        try (BufferedReader reader = new BufferedReader(
+                new InputStreamReader(socket.getInputStream()))) {
+            String str;
+            while ((str = reader.readLine()) != null) {
+                String[] token = str.split(":", 2);
+                if (token.length != 2) continue;
                 DtoType type = DtoType.valueOf(token[0]);
                 String message = token[1];
-
-                processReceivedMessage(type, message);
-
-                Thread.sleep(300);
-            }
-        }
-        catch (Exception e) {
-            try {
-                System.out.println("socket error (can't get socket input stream)");
-                socket.close();
-            } catch (IOException ex) {
-                ex.printStackTrace();
-            }
-            e.printStackTrace();
-        }
-
-    }
-
-    private void processReceivedMessage(DtoType type, String message) {
-        System.out.println(message);
-
-        switch (type) {
-        case CHECK_ID:
-            String[] checkResult = message.split(",", 2);
-            if (checkResult.length == 2) {
+                // Preserve response order and update Swing components on the EDT.
                 SwingUtilities.invokeLater(() -> {
-                    SignupFrame frame = Application.signupFrame;
-                    if (frame != null) {
-                        frame.showCheckIdResult(
-                                checkResult[0], checkResult[1]);
+                    try {
+                        processReceivedMessage(type, message);
+                    } catch (RuntimeException e) {
+                        System.err.println("Invalid server response: " + type);
+                        if (type == DtoType.LOGIN_RESULT && Application.loginFrame != null) {
+                            Application.loginFrame.showLoginResult("ERROR", "", "");
+                        }
                     }
                 });
             }
-            break;
-            
+        } catch (Exception e) {
+            System.err.println("Connection ended: " + e.getClass().getSimpleName());
+        } finally {
+            try {
+                socket.close();
+            } catch (IOException e) {
+                System.err.println("Socket close failed.");
+            }
+            SwingUtilities.invokeLater(() -> {
+                if (Application.loginFrame != null) {
+                    Application.loginFrame.showLoginResult("ERROR", "", "");
+                }
+                if (Application.profileFrame != null) {
+                    Application.profileFrame.profileConnectionFailed();
+                }
+                if (Application.signupFrame != null) {
+                    Application.signupFrame.showSignupResult("ERROR");
+                }
+            });
+        }
+    }
+
+    private void processReceivedMessage(DtoType type, String message) {
+        if (Application.me == null && type != DtoType.LOGIN_RESULT
+                && type != DtoType.CHECK_ID && type != DtoType.SIGNUP) return;
+
+        switch (type) {
+	        case PROFILE_UPDATE_RESULT: {
+	            if (Application.profileFrame != null) {
+	                Application.profileFrame.showUpdateResult(message);
+	            }
+	            break;
+	        }
+	        case PROFILE_RESULT: {
+	            if (Application.profileFrame != null) {
+	                Application.profileFrame.showProfileResult(message);
+	            }
+	            break;
+	        }
+            case LOGIN_RESULT: {
+                String[] result = message.split(",", -1);
+                if (result.length != 3) throw new IllegalArgumentException("Invalid login result");
+                String loginId = new String(Base64.getDecoder().decode(result[1]), StandardCharsets.UTF_8);
+                String nickname = new String(Base64.getDecoder().decode(result[2]), StandardCharsets.UTF_8);
+                if (Application.loginFrame != null) {
+                    Application.loginFrame.showLoginResult(result[0], loginId, nickname);
+                }
+                break;
+            }
+            case CHECK_ID: {
+                String[] result = message.split(",", 2);
+                if (result.length == 2 && Application.signupFrame != null) {
+                    Application.signupFrame.showCheckIdResult(result[0], result[1]);
+                }
+                break;
+            }
+            case SIGNUP: {
+                SignupFrame frame = Application.signupFrame;
+                if (frame != null) frame.showSignupResult(message);
+                break;
+            }
             case LOGIN:
                 InitResponse initRes = new InitResponse(message);
                 Application.chatRooms = initRes.getChatRooms();

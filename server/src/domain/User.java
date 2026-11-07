@@ -1,6 +1,5 @@
 package domain;
 
-import dto.request.LoginRequest;
 
 import java.net.Socket;
 import java.util.Date;
@@ -14,15 +13,24 @@ public class User {
     private String name; // 이름: 채팅방에서 사용되는 이름
 
     private Date createdAt; // 로그인 시점
+    
+    private int memberId;
 
-    public User(Socket socket, LoginRequest req) {
+    public User(Socket socket, Member member) {
         this.socket = socket;
-        this.id = req.getId();
-        this.name = req.getName();
-
+        this.memberId = member.getUserId();
+        this.id = member.getLoginId();
+        this.name = member.getNickname();
         this.createdAt = new Date();
     }
 
+
+
+    
+    public int getMemberId() {
+        return memberId;
+    }
+    
     public String getId() {
         return id;
     }
@@ -45,5 +53,9 @@ public class User {
 
     public String getExitString() {
         return "[" + name + "]님이 퇴장했습니다.";
+    }
+    
+    public void setName(String name) {
+        this.name = name;
     }
 }
