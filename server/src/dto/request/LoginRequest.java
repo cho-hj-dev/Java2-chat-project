@@ -1,22 +1,30 @@
 package dto.request;
 
+import java.nio.charset.StandardCharsets;
+import java.util.Base64;
+
 public class LoginRequest {
-
-    String id;
-
-    String name;
+    private final String id;
+    private final String password;
 
     public LoginRequest(String message) {
-        String[] value = message.split(",");
-        id = value[0];
-        name = value[1];
+        String[] values = message.split(",", -1);
+        if (values.length != 2) {
+            throw new IllegalArgumentException("Invalid login request.");
+        }
+        id = decode(values[0]);
+        password = decode(values[1]);
+    }
+
+    private static String decode(String value) {
+        return new String(Base64.getDecoder().decode(value), StandardCharsets.UTF_8);
     }
 
     public String getId() {
         return id;
     }
 
-    public String getName() {
-        return name;
+    public String getPassword() {
+        return password;
     }
 }

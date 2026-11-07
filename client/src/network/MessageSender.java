@@ -14,16 +14,25 @@ public class MessageSender {
         this.socket = socket;
     }
 
-    public void sendMessage(DTO dto) {
+    public synchronized boolean sendMessage(DTO dto) {
         DtoType type = dto.getType();
 
         try {
             PrintWriter writer = new PrintWriter(socket.getOutputStream(), true);
 
             switch (type) {
+	            case PROFILE_UPDATE:
+	                writer.println((ProfileUpdateRequest) dto);
+	                break;
+            	case PROFILE_GET:
+            		writer.println((ProfileRequest) dto);
+            		break;
             	case CHECK_ID:
             		writer.println((CheckIdRequest) dto);
             		break;
+            	case SIGNUP:
+            	    writer.println((SignupRequest) dto);
+            	    break;
                 case LOGIN:
                     writer.println((LoginRequest) dto);
                     break;
@@ -42,9 +51,11 @@ public class MessageSender {
             }
 
             writer.flush();
+            return !writer.checkError();
         }
         catch (Exception e) {
             e.printStackTrace();
+            return false;
         }
 
     }

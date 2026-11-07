@@ -5,6 +5,8 @@ import domain.User;
 import network.MessageReceiver;
 import network.MessageSender;
 import view.frame.LobbyFrame;
+import view.frame.LoginFrame;
+import javax.swing.SwingUtilities;
 import view.panel.ChatPanel;
 import view.panel.ChatRoomUserListPanel;
 import view.frame.SignupFrame;
@@ -24,8 +26,10 @@ public class Application {
     public static MessageReceiver receiver;
 
     public static LobbyFrame lobbyFrame;
-    
+    public static LoginFrame loginFrame;
+
     public static SignupFrame signupFrame;
+    public static view.frame.ProfileFrame profileFrame;
 
     public static User me;
 
@@ -47,11 +51,17 @@ public class Application {
 
             sender = new MessageSender(socket);
             receiver = new MessageReceiver(socket);
+            Runnable initializeUi = () -> {
+                lobbyFrame = new LobbyFrame();
+                chatPanelMap.put(LOBBY_CHAT_NAME, lobbyFrame.getChatPanel());
+                chatRoomUserListPanelMap.put(LOBBY_CHAT_NAME, lobbyFrame.getChatRoomUserListPanel());
+            };
+            if (SwingUtilities.isEventDispatchThread()) {
+                initializeUi.run();
+            } else {
+                SwingUtilities.invokeAndWait(initializeUi);
+            }
             receiver.start();
-
-            lobbyFrame = new LobbyFrame();
-            chatPanelMap.put(LOBBY_CHAT_NAME, lobbyFrame.getChatPanel());
-            chatRoomUserListPanelMap.put(LOBBY_CHAT_NAME, lobbyFrame.getChatRoomUserListPanel());
 
 
         } catch (Exception e) {
