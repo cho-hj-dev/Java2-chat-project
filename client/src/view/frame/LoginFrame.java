@@ -21,7 +21,7 @@ public class LoginFrame extends JFrame implements ActionListener {
         Application.loginFrame = this;
         setTitle("로그인");
         setLayout(null);
-        setSize(600, 400);
+        setSize(600, 500);
         setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
         JLabel idLabel = new JLabel("아이디");
         idLabel.setBounds(100, 50, 100, 50);
@@ -43,6 +43,23 @@ public class LoginFrame extends JFrame implements ActionListener {
             setVisible(false);
         });
         add(signupBtn);
+        JButton findIdBtn = new JButton("아이디 찾기");
+        findIdBtn.setBounds(150, 340, 300, 40);
+        findIdBtn.addActionListener(e -> {
+            if (loginPending) return;
+            new FindIdFrame(this);
+            setVisible(false);
+        });
+        add(findIdBtn);
+        JButton resetPasswordBtn =
+                new JButton("비밀번호 재설정");
+        resetPasswordBtn.setBounds(150, 390, 300, 40);
+        resetPasswordBtn.addActionListener(e -> {
+            if (loginPending) return;
+            new ResetPasswordFrame(this);
+            setVisible(false);
+        });
+        add(resetPasswordBtn);
         getRootPane().setDefaultButton(loginBtn);
         setVisible(true);
     }

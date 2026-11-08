@@ -10,6 +10,8 @@ public class SignupResponse extends DTO {
         INVALID_INPUT,
         ERROR,
         DUPLICATE_NICKNAME,
+        INVALID_EMAIL_CODE,
+        DUPLICATE_EMAIL,
     }
 
     private final Status status;

@@ -21,6 +21,12 @@ public class MessageSender {
             PrintWriter writer = new PrintWriter(socket.getOutputStream(), true);
 
             switch (type) {
+	            case ACCOUNT_RECOVERY:
+	                writer.println((AccountRecoveryRequest) dto);
+	                break;
+	            case EMAIL_CODE:
+	                writer.println((EmailCodeRequest) dto);
+	                break;
 	            case PROFILE_UPDATE:
 	                writer.println((ProfileUpdateRequest) dto);
 	                break;

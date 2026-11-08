@@ -50,6 +50,33 @@ public class UserDao {
             return statement.executeUpdate();
         }
     }
+    
+    public int insertVerified(
+            Connection connection,
+            String loginId, String passwordHash, String nickname,
+            String postalCode, String address, String addressDetail,
+            String profileImagePath, String email) throws SQLException {
+
+        String sql = """
+                INSERT INTO users
+                    (login_id, password_hash, nickname,
+                     postal_code, address, address_detail,
+                     profile_image_path, email, email_verified_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW())
+                """;
+
+        try (PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setString(1, loginId);
+            statement.setString(2, passwordHash);
+            statement.setString(3, nickname);
+            statement.setString(4, postalCode.isEmpty() ? null : postalCode);
+            statement.setString(5, address.isEmpty() ? null : address);
+            statement.setString(6, addressDetail.isEmpty() ? null : addressDetail);
+            statement.setString(7, profileImagePath);
+            statement.setString(8, email);
+            return statement.executeUpdate();
+        }
+    }
 
     public Optional<Member> findByLoginId(String loginId)
             throws SQLException {
