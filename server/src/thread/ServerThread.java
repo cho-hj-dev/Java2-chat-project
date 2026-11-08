@@ -31,6 +31,10 @@ import java.util.Arrays;
 import dao.UserDao;
 import java.sql.SQLException;
 
+import db.DBConnection;
+import service.SignupEmailService;
+import java.sql.Connection;
+
 public class ServerThread extends Thread {
 
     Socket socket; // 담당자 (not 문지기)
@@ -62,7 +66,9 @@ public class ServerThread extends Thread {
                         && type != DtoType.SIGNUP 
                         && type != DtoType.CHECK_ID
                         && type != DtoType.PROFILE_GET
-                        && type != DtoType.PROFILE_UPDATE) {
+                        && type != DtoType.PROFILE_UPDATE
+                        && type != DtoType.EMAIL_CODE
+                        && type != DtoType.ACCOUNT_RECOVERY) { //가입 전에도 인증 메일을 요청해야 한다.
                     sendLoginResult(LoginResultResponse.Status.INVALID_CREDENTIALS, "", "");
                     continue;
                 }
@@ -142,10 +148,11 @@ public class ServerThread extends Thread {
             return loggedInUser;
         }
     }
-
+    
     private SignupResponse.Status registerMember(String message) {
         String imagePath = null;
         boolean stored = false;
+
         try {
             SignupRequest request = new SignupRequest(message);
             String loginId = request.getLoginId();
@@ -154,9 +161,16 @@ public class ServerThread extends Thread {
             String postalCode = request.getPostalCode().trim();
             String address = request.getAddress().trim();
             String addressDetail = request.getAddressDetail().trim();
-            boolean hasAddress = !postalCode.isEmpty() || !address.isEmpty() || !addressDetail.isEmpty();
-            boolean validAddress = (!hasAddress || (postalCode.matches("[0-9]{5}") && !address.isEmpty()))
-                    && address.length() <= 255 && addressDetail.length() <= 255
+            String email = SignupEmailService.normalizeEmail(request.getEmail());
+            String emailCode = request.getEmailCode();
+            long verificationId = request.getVerificationId();
+
+            boolean hasAddress = !postalCode.isEmpty()
+                    || !address.isEmpty() || !addressDetail.isEmpty();
+            boolean validAddress = (!hasAddress
+                    || (postalCode.matches("[0-9]{5}") && !address.isEmpty()))
+                    && address.length() <= 255
+                    && addressDetail.length() <= 255
                     && !java.util.regex.Pattern.compile("\\p{Cntrl}")
                             .matcher(address + addressDetail).find();
 
@@ -166,11 +180,23 @@ public class ServerThread extends Thread {
             boolean validNickname =
                     nickname.matches("[^,:\\p{Cntrl}]{1,50}");
 
-            if (!validId || !validPassword || !validNickname || !validAddress) {
+            if (!validId || !validPassword || !validNickname
+                    || !validAddress || !SignupEmailService.validEmail(email)) {
                 return SignupResponse.Status.INVALID_INPUT;
             }
 
-            BufferedImage image = ProfileImageStore.decode(request.getProfileImage());
+            SignupEmailService emailService = new SignupEmailService();
+
+            // 화면에서 이미 확인했더라도 가입 요청에서 다시 검증한다.
+            // 잘못된 번호라면 기존 검증 메서드가 시도 횟수를 기록한다.
+            if (!emailService.verifySignupCode(
+                    verificationId, email, emailCode)) {
+                return SignupResponse.Status.INVALID_EMAIL_CODE;
+            }
+
+            BufferedImage image =
+                    ProfileImageStore.decode(request.getProfileImage());
+
             char[] passwordChars = password.toCharArray();
             String passwordHash;
             try {
@@ -180,34 +206,60 @@ public class ServerThread extends Thread {
             }
 
             imagePath = ProfileImageStore.save(image);
-            int inserted = new UserDao().insert(
-                    loginId, passwordHash, nickname, postalCode, address, addressDetail, imagePath);
-            stored = inserted == 1;
 
-            return inserted == 1
-                    ? SignupResponse.Status.SUCCESS
-                    : SignupResponse.Status.ERROR;
+            try (Connection connection = DBConnection.getConnection()) {
+                connection.setAutoCommit(false);
+
+                try {
+                    // 동시 요청이나 번호 재사용을 막기 위해 트랜잭션 안에서 재확인한다.
+                    if (!emailService.consumeSignupCode(
+                            connection, verificationId, email, emailCode)) {
+                        connection.rollback();
+                        return SignupResponse.Status.INVALID_EMAIL_CODE;
+                    }
+
+                    int inserted = new UserDao().insertVerified(
+                            connection, loginId, passwordHash, nickname,
+                            postalCode, address, addressDetail,
+                            imagePath, email);
+
+                    if (inserted != 1) {
+                        connection.rollback();
+                        return SignupResponse.Status.ERROR;
+                    }
+
+                    connection.commit();
+                    stored = true;
+                    return SignupResponse.Status.SUCCESS;
+
+                } catch (Exception e) {
+                    connection.rollback();
+                    throw e;
+                }
+            }
 
         } catch (IllegalArgumentException e) {
             return SignupResponse.Status.INVALID_INPUT;
+
         } catch (SQLException e) {
-        	if (e.getErrorCode() == 1062) {
-        	    String detail = e.getMessage();
-
-        	    if (detail != null && detail.contains("uq_users_nickname")) {
-        	        return SignupResponse.Status.DUPLICATE_NICKNAME;
-        	    }
-
-        	    return SignupResponse.Status.DUPLICATE_ID;
-        	}
+            if (e.getErrorCode() == 1062) {
+                String detail = e.getMessage();
+                if (detail != null && detail.contains("uq_users_nickname")) {
+                    return SignupResponse.Status.DUPLICATE_NICKNAME;
+                }
+                if (detail != null && detail.contains("uq_users_email")) {
+                    return SignupResponse.Status.DUPLICATE_EMAIL;
+                }
+                return SignupResponse.Status.DUPLICATE_ID;
+            }
             System.err.println("회원가입 DB 오류 코드: " + e.getErrorCode());
             return SignupResponse.Status.ERROR;
-        } catch (GeneralSecurityException e) {
-            System.err.println("회원가입 비밀번호 해시 처리 실패");
+
+        } catch (Exception e) {
+            System.err.println(
+                    "회원가입 처리 실패: " + e.getClass().getSimpleName());
             return SignupResponse.Status.ERROR;
-        } catch (IOException e) {
-            System.err.println("프로필 사진 저장 실패");
-            return SignupResponse.Status.ERROR;
+
         } finally {
             if (!stored && imagePath != null) {
                 try {
@@ -222,6 +274,17 @@ public class ServerThread extends Thread {
     private void processReceiveMessage(DtoType type, String message)
             throws UserNotFoundException, ChatRoomNotFoundException, ChatRoomExistException, IOException {
         switch (type) {
+        
+	        case ACCOUNT_RECOVERY: {
+	            handleAccountRecovery(message);
+	            break;
+	        }
+        
+	        case EMAIL_CODE: {
+	            handleEmailCode(message);
+	            break;
+	        }
+	        
         	case PROFILE_GET: {
         		sendProfile(message);
         		break;
@@ -622,4 +685,179 @@ public class ServerThread extends Thread {
             }
         }
     }
+    
+    // 요청 형식은 발송 SEND, 이메일 / 확인 VERIFY, 요청번호, 이메일, 6자리번호, 이메일은 Base64로 전송
+    private void handleEmailCode(String message) throws IOException {
+        String[] values = message.split(",", -1);
+
+        String action = values.length > 0 ? values[0] : "";
+        String requestId = "0";
+        String status = "ERROR";
+
+        try {
+            service.SignupEmailService emailService =
+                    new service.SignupEmailService();
+
+            if ("SEND".equals(action) && values.length == 2) {
+                String email = new String(
+                        java.util.Base64.getDecoder().decode(values[1]),
+                        java.nio.charset.StandardCharsets.UTF_8
+                );
+
+                if (!service.SignupEmailService.validEmail(
+                        service.SignupEmailService.normalizeEmail(email))) {
+                    status = "INVALID_EMAIL";
+                } else {
+                    long id = emailService.sendSignupCode(email);
+                    requestId = Long.toString(id);
+                    status = "SENT";
+                }
+
+            } else if ("VERIFY".equals(action) && values.length == 4) {
+                long id = Long.parseLong(values[1]);
+                requestId = Long.toString(id);
+
+                String email = new String(
+                        java.util.Base64.getDecoder().decode(values[2]),
+                        java.nio.charset.StandardCharsets.UTF_8
+                );
+
+                boolean matched = emailService.verifySignupCode(
+                        id, email, values[3]
+                );
+
+                status = matched ? "VERIFIED" : "INVALID_CODE";
+            }
+        } catch (IllegalArgumentException e) {
+            status = "INVALID_INPUT";
+        } catch (Exception e) {
+            // 인증번호와 메일 비밀번호는 로그에 남기지 않음
+            System.err.println(
+                    "이메일 인증 처리 실패: "
+                    + e.getClass().getSimpleName()
+            );
+            status = "ERROR";
+        }
+
+        synchronized (socket) {
+            PrintWriter writer =
+                    new PrintWriter(socket.getOutputStream(), true);
+
+            writer.println(
+                    DtoType.EMAIL_CODE_RESULT + ":"
+                    + action + "," + requestId + "," + status
+            );
+
+            if (writer.checkError()) {
+                throw new IOException("이메일 인증 응답 전송 실패");
+            }
+        }
+    }
+    
+    private void handleAccountRecovery(String message) throws IOException {
+        String[] values = message.split(",", -1);
+        String action = values.length > 0 ? values[0] : "";
+        String status = "ERROR";
+        String requestId = "0";
+        String encodedLoginId = "";
+
+        try {
+            service.AccountRecoveryService recovery =
+                    new service.AccountRecoveryService();
+
+            if ("FIND_ID_SEND".equals(action) && values.length == 2) {
+                String email = new String(
+                        java.util.Base64.getDecoder().decode(values[1]),
+                        java.nio.charset.StandardCharsets.UTF_8);
+
+                if (!service.SignupEmailService.validEmail(
+                        service.SignupEmailService.normalizeEmail(email))) {
+                    status = "INVALID_EMAIL";
+                } else {
+                    long id = recovery.sendFindIdCode(email);
+                    requestId = Long.toString(id);
+                    status = "SENT";
+                }
+
+            } else if ("FIND_ID_VERIFY".equals(action)
+                    && values.length == 4) {
+                long id = Long.parseLong(values[1]);
+                requestId = Long.toString(id);
+
+                String email = new String(
+                        java.util.Base64.getDecoder().decode(values[2]),
+                        java.nio.charset.StandardCharsets.UTF_8);
+
+                String loginId = recovery.verifyFindIdCode(
+                        id, email, values[3]);
+
+                if (loginId == null) {
+                    status = "INVALID_CODE";
+                } else if (loginId.isEmpty()) {
+                    status = "NO_ACCOUNT";
+                } else {
+                    status = "VERIFIED";
+                    encodedLoginId = java.util.Base64.getEncoder()
+                            .encodeToString(loginId.getBytes(
+                                    java.nio.charset.StandardCharsets.UTF_8));
+                }
+            } else if ("RESET_SEND".equals(action)
+                    && values.length == 3) {
+                String loginId = new String(
+                        java.util.Base64.getDecoder().decode(values[1]),
+                        java.nio.charset.StandardCharsets.UTF_8);
+                String email = new String(
+                        java.util.Base64.getDecoder().decode(values[2]),
+                        java.nio.charset.StandardCharsets.UTF_8);
+
+                long id = recovery.sendResetCode(loginId, email);
+                requestId = Long.toString(id);
+                status = "SENT";
+
+            } else if ("RESET_COMMIT".equals(action)
+                    && values.length == 6) {
+                long id = Long.parseLong(values[1]);
+                requestId = Long.toString(id);
+
+                String loginId = new String(
+                        java.util.Base64.getDecoder().decode(values[2]),
+                        java.nio.charset.StandardCharsets.UTF_8);
+                String email = new String(
+                        java.util.Base64.getDecoder().decode(values[3]),
+                        java.nio.charset.StandardCharsets.UTF_8);
+                String newPassword = new String(
+                        java.util.Base64.getDecoder().decode(values[5]),
+                        java.nio.charset.StandardCharsets.UTF_8);
+
+                status = recovery.resetPassword(
+                        id, loginId, email, values[4], newPassword);
+            } else {
+                status = "INVALID_INPUT";
+            }
+
+        } catch (IllegalArgumentException e) {
+            status = "INVALID_INPUT";
+        } catch (IllegalStateException e) {
+            status = "RATE_LIMIT".equals(e.getMessage())
+                    ? "WAIT" : "ERROR";
+        } catch (Exception e) {
+            System.err.println(
+                    "아이디 찾기 처리 실패: "
+                    + e.getClass().getSimpleName());
+            status = "ERROR";
+        }
+
+        synchronized (socket) {
+            PrintWriter writer =
+                    new PrintWriter(socket.getOutputStream(), true);
+            writer.println(DtoType.ACCOUNT_RECOVERY_RESULT
+                    + ":" + action + "," + status + ","
+                    + requestId + "," + encodedLoginId);
+
+            if (writer.checkError()) {
+                throw new IOException("아이디 찾기 결과 전송 실패");
+            }
+        }
+    }
+    
 }

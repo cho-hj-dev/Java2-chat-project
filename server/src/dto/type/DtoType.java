@@ -1,6 +1,12 @@
 package dto.type;
 
 public enum DtoType {
+	ACCOUNT_RECOVERY,
+	ACCOUNT_RECOVERY_RESULT,
+	
+	EMAIL_CODE,
+	EMAIL_CODE_RESULT,
+	
 	PROFILE_GET, // 내 프로필 조회 요청
 	PROFILE_RESULT, // 프로필 조회 결과 응답
 	

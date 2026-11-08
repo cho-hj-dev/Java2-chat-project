@@ -69,22 +69,44 @@ public class MessageReceiver extends Thread {
     }
 
     private void processReceivedMessage(DtoType type, String message) {
-        if (Application.me == null && type != DtoType.LOGIN_RESULT
-                && type != DtoType.CHECK_ID && type != DtoType.SIGNUP) return;
+    	if (Application.me == null && type != DtoType.LOGIN_RESULT
+    	        && type != DtoType.CHECK_ID
+    	        && type != DtoType.EMAIL_CODE_RESULT
+    	        && type != DtoType.ACCOUNT_RECOVERY_RESULT) return;
 
         switch (type) {
+        
+	        case ACCOUNT_RECOVERY_RESULT: {
+	            if (Application.findIdFrame != null) {
+	                Application.findIdFrame.showResult(message);
+	            }
+	            if (Application.resetPasswordFrame != null) {
+	                Application.resetPasswordFrame.showResult(message);
+	            }
+	            break;
+	        }
+	        
+	        case EMAIL_CODE_RESULT: {
+	            if (Application.signupFrame != null) {
+	                Application.signupFrame.showEmailCodeResult(message);
+	            }
+	            break;
+	        }
+        	
 	        case PROFILE_UPDATE_RESULT: {
 	            if (Application.profileFrame != null) {
 	                Application.profileFrame.showUpdateResult(message);
 	            }
 	            break;
 	        }
+	        
 	        case PROFILE_RESULT: {
 	            if (Application.profileFrame != null) {
 	                Application.profileFrame.showProfileResult(message);
 	            }
 	            break;
 	        }
+	        
             case LOGIN_RESULT: {
                 String[] result = message.split(",", -1);
                 if (result.length != 3) throw new IllegalArgumentException("Invalid login result");
@@ -95,6 +117,7 @@ public class MessageReceiver extends Thread {
                 }
                 break;
             }
+            
             case CHECK_ID: {
                 String[] result = message.split(",", 2);
                 if (result.length == 2 && Application.signupFrame != null) {
@@ -102,11 +125,13 @@ public class MessageReceiver extends Thread {
                 }
                 break;
             }
+            
             case SIGNUP: {
                 SignupFrame frame = Application.signupFrame;
                 if (frame != null) frame.showSignupResult(message);
                 break;
             }
+            
             case LOGIN:
                 InitResponse initRes = new InitResponse(message);
                 Application.chatRooms = initRes.getChatRooms();

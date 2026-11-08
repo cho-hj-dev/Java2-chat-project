@@ -28,8 +28,11 @@ public class Application {
     public static LobbyFrame lobbyFrame;
     public static LoginFrame loginFrame;
 
+    public static view.frame.FindIdFrame findIdFrame;
+    
     public static SignupFrame signupFrame;
     public static view.frame.ProfileFrame profileFrame;
+    public static view.frame.ResetPasswordFrame resetPasswordFrame;
 
     public static User me;
 

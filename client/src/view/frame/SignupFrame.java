@@ -9,6 +9,7 @@ import javax.swing.event.DocumentListener;
 import app.Application;
 import dto.request.CheckIdRequest;
 import dto.request.SignupRequest;
+import dto.request.EmailCodeRequest;
 import util.ProfileImages;
 import javax.swing.filechooser.FileNameExtensionFilter;
 
@@ -37,11 +38,24 @@ public class SignupFrame extends JFrame {
     private boolean imageLoading;
     private String checkedLoginId;
     private boolean signupPending;
+    
+    private final JTextField emailField = new JTextField();
+    private final JTextField emailCodeField = new JTextField();
+
+    private final JButton sendEmailCodeButton = new JButton("인증번호 발송");
+    private final JButton verifyEmailCodeButton = new JButton("인증번호 확인");
+
+    private final JLabel emailResult = new JLabel("이메일 인증이 필요합니다.");
+
+    private String verifiedEmail;
+    
+    private long emailVerificationId;
+    private boolean emailRequestPending;
 
     public SignupFrame(LoginFrame loginFrame) {
         setTitle("회원가입");
         setLayout(null);
-        setSize(800, 590);
+        setSize(800, 710);
         setLocationRelativeTo(loginFrame);
         setDefaultCloseOperation(JFrame.DISPOSE_ON_CLOSE);
 
@@ -52,6 +66,44 @@ public class SignupFrame extends JFrame {
         addRow("우편번호", postalCodeField, 305);
         addRow("기본주소", addressField, 365);
         addRow("상세주소", addressDetailField, 425);
+        addRow("이메일", emailField, 485);
+        addRow("인증번호", emailCodeField, 545);
+
+        emailField.setBounds(190, 485, 190, 35);
+        sendEmailCodeButton.setBounds(390, 485, 105, 35);
+        add(sendEmailCodeButton);
+
+        emailCodeField.setBounds(190, 545, 190, 35);
+        verifyEmailCodeButton.setBounds(390, 545, 105, 35);
+        add(verifyEmailCodeButton);
+
+        emailResult.setBounds(190, 575, 305, 25);
+        add(emailResult);
+
+        // 서버 발송·검증 연결 후 활성화
+        emailField.getDocument().addDocumentListener(new DocumentListener() {
+            private void resetEmailResult() {
+                verifiedEmail = null;
+                emailVerificationId = 0;
+                emailResult.setText("이메일 인증이 필요합니다.");
+                updateEmailButtons();
+                updateSignupButton();
+            }
+
+            public void insertUpdate(DocumentEvent e) {
+                resetEmailResult();
+            }
+
+            public void removeUpdate(DocumentEvent e) {
+                resetEmailResult();
+            }
+
+            public void changedUpdate(DocumentEvent e) {
+                resetEmailResult();
+            }
+        });
+
+        updateEmailButtons();
         passwordResult.setBounds(190, 160, 305, 25);
         add(passwordResult);
         confirmResult.setBounds(190, 220, 305, 25);
@@ -61,9 +113,9 @@ public class SignupFrame extends JFrame {
         add(checkIdButton);
         idResult.setBounds(190, 75, 305, 30);
         add(idResult);
-        signupButton.setBounds(190, 490, 140, 40);
+        signupButton.setBounds(190, 610, 140, 40);
         add(signupButton);
-        backButton.setBounds(345, 490, 150, 40);
+        backButton.setBounds(345, 610, 150, 40);
         add(backButton);
         photoPreview.setBounds(550, 35, 200, 200);
         photoPreview.setBorder(BorderFactory.createLineBorder(java.awt.Color.LIGHT_GRAY));
@@ -102,6 +154,8 @@ public class SignupFrame extends JFrame {
         });
 
         checkIdButton.addActionListener(e -> checkId());
+        sendEmailCodeButton.addActionListener(e -> sendEmailCode());
+        verifyEmailCodeButton.addActionListener(e -> verifyEmailCode());
         signupButton.addActionListener(e -> submitSignup());
         backButton.addActionListener(e -> {
             if (!signupPending) dispose();
@@ -119,6 +173,139 @@ public class SignupFrame extends JFrame {
         });
         setVisible(true);
     }
+        
+        private void updateEmailButtons() {
+            boolean available = !signupPending && !emailRequestPending;
+
+            sendEmailCodeButton.setEnabled(
+                    available && !emailField.getText().trim().isEmpty()
+            );
+
+            verifyEmailCodeButton.setEnabled(
+                    available
+                    && emailVerificationId > 0
+                    && verifiedEmail == null
+            );
+        }
+
+        private void sendEmailCode() {
+            if (emailRequestPending || signupPending) {
+                return;
+            }
+
+            String email = emailField.getText().trim();
+
+            if (!serviceEmailFormat(email)) {
+                emailResult.setText("이메일 형식을 확인하세요.");
+                return;
+            }
+
+            verifiedEmail = null;
+            emailVerificationId = 0;
+            emailRequestPending = true;
+            emailResult.setText("인증번호 발송 중...");
+            updateEmailButtons();
+            updateSignupButton();
+
+            if (Application.sender == null
+                    || !Application.sender.sendMessage(
+                            EmailCodeRequest.send(email))) {
+
+                emailRequestPending = false;
+                emailResult.setText("발송 요청 실패. 서버 연결을 확인하세요.");
+                updateEmailButtons();
+            }
+        }
+
+        private void verifyEmailCode() {
+            if (emailRequestPending || signupPending
+                    || emailVerificationId <= 0) {
+                return;
+            }
+
+            String code = emailCodeField.getText().trim();
+
+            if (!code.matches("[0-9]{6}")) {
+                emailResult.setText("인증번호 6자리를 입력하세요.");
+                return;
+            }
+
+            emailRequestPending = true;
+            emailResult.setText("인증번호 확인 중...");
+            updateEmailButtons();
+
+            if (Application.sender == null
+                    || !Application.sender.sendMessage(
+                            EmailCodeRequest.verify(
+                                    emailVerificationId,
+                                    emailField.getText().trim(),
+                                    code))) {
+
+                emailRequestPending = false;
+                emailResult.setText("확인 요청 실패. 서버 연결을 확인하세요.");
+                updateEmailButtons();
+            }
+        }
+
+        public void showEmailCodeResult(String message) {
+            if (!isDisplayable() || !emailRequestPending) {
+                return;
+            }
+
+            String[] result = message.split(",", -1);
+
+            if (result.length != 3) {
+                emailRequestPending = false;
+                emailResult.setText("인증 응답 형식 오류");
+                updateEmailButtons();
+                return;
+            }
+
+            String action = result[0];
+            String status = result[2];
+
+            emailRequestPending = false;
+
+            if ("SEND".equals(action) && "SENT".equals(status)) {
+                try {
+                    emailVerificationId = Long.parseLong(result[1]);
+                    emailResult.setText(
+                            "이메일로 보낸 6자리 번호를 입력하세요."
+                    );
+                } catch (NumberFormatException e) {
+                    emailVerificationId = 0;
+                    emailResult.setText("인증 요청 번호 오류");
+                }
+
+            } else if ("VERIFY".equals(action)
+                    && "VERIFIED".equals(status)
+                    && result[1].equals(
+                            Long.toString(emailVerificationId))) {
+
+                verifiedEmail = emailField.getText().trim();
+                emailResult.setText("이메일 인증 완료");
+
+            } else if ("VERIFY".equals(action)) {
+                verifiedEmail = null;
+                emailResult.setText(
+                        "인증번호가 틀렸거나 만료되었습니다."
+                );
+            } else {
+                emailResult.setText(
+                        "인증번호 발송 실패. 서버 설정과 메일 주소를 확인하세요."
+                );
+            }
+
+            updateEmailButtons();
+            updateSignupButton();
+        }
+
+        private boolean serviceEmailFormat(String email) {
+            return email.length() <= 254
+                    && email.matches(
+                            "^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}$"
+                    );
+        }
 
     private void choosePhoto() {
         JFileChooser chooser = new JFileChooser();
@@ -183,8 +370,14 @@ public class SignupFrame extends JFrame {
     }
 
     private void updateSignupButton() {
-        signupButton.setEnabled(!signupPending && !imageLoading && checkedLoginId != null
-                && checkedLoginId.equals(idField.getText().trim()));
+        signupButton.setEnabled(
+                !signupPending
+                && !imageLoading
+                && checkedLoginId != null
+                && checkedLoginId.equals(idField.getText().trim())
+                && verifiedEmail != null
+                && verifiedEmail.equals(emailField.getText().trim())
+        );
     }
 
     private void setSignupPending(boolean pending) {
@@ -203,7 +396,10 @@ public class SignupFrame extends JFrame {
         setDefaultCloseOperation(pending
                 ? JFrame.DO_NOTHING_ON_CLOSE : JFrame.DISPOSE_ON_CLOSE);
         signupButton.setText(pending ? "가입 중..." : "가입");
+        updateEmailButtons();
         updateSignupButton();
+        emailField.setEditable(!pending);
+        emailCodeField.setEditable(!pending);
     }
 
     private void submitSignup() {
@@ -241,9 +437,24 @@ public class SignupFrame extends JFrame {
             showError("주소는 각 255자 이내로, 제어 문자 없이 입력하세요.");
             return;
         }
+        
+        String email = emailField.getText().trim();
+        String emailCode = emailCodeField.getText().trim();
+
+        if (verifiedEmail == null
+                || !verifiedEmail.equals(email)
+                || emailVerificationId <= 0
+                || !emailCode.matches("[0-9]{6}")) {
+            showError("이메일 인증을 완료한 뒤 가입하세요.");
+            return;
+        }
+        
         setSignupPending(true);
         if (Application.sender == null || !Application.sender.sendMessage(
-                new SignupRequest(loginId, password, nickname, postalCode, address, addressDetail, profileImage))) {
+        		new SignupRequest(
+        		        loginId, password, nickname,
+        		        postalCode, address, addressDetail,
+        		        profileImage, email, emailVerificationId, emailCode))) {
             checkedLoginId = null;
             idResult.setText("아이디 중복확인 필요");
             setSignupPending(false);
@@ -270,6 +481,8 @@ public class SignupFrame extends JFrame {
             case "INVALID_INPUT" -> "아이디, 비밀번호, 닉네임, 주소, 사진 입력값을 확인하세요.";
             default -> "회원가입 처리에 실패했습니다. 다시 시도하세요.";
             case "DUPLICATE_NICKNAME" -> "이미 사용 중인 닉네임입니다. 다른 닉네임을 입력하세요.";
+            case "INVALID_EMAIL_CODE" -> "이메일 인증번호가 틀렸거나 만료되었습니다. 다시 인증하세요.";
+            case "DUPLICATE_EMAIL" -> "이미 등록된 이메일입니다. 다른 이메일을 사용하세요.";
         };
         showError(message);
     }

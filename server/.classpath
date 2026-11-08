@@ -7,5 +7,8 @@
 	</classpathentry>
 	<classpathentry kind="src" path="src"/>
 	<classpathentry kind="lib" path="lib/mysql-connector-j-8.0.33/mysql-connector-j-8.0.33.jar"/>
+	<classpathentry kind="lib" path="lib/mail/angus-activation-2.0.3.jar"/>
+	<classpathentry kind="lib" path="lib/mail/jakarta.activation-api-2.2.0-M1.jar"/>
+	<classpathentry kind="lib" path="lib/mail/jakarta.mail-2.0.5.jar"/>
 	<classpathentry kind="output" path="bin"/>
 </classpath>
