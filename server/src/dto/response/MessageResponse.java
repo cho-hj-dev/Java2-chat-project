@@ -16,7 +16,7 @@ public class MessageResponse extends DTO {
     public MessageResponse(String message) {
         super(DtoType.MESSAGE);
 
-        String[] value = message.split(",");
+        String[] value = message.split(",", 4);
         messageType = MessageType.valueOf(value[0]);
         chatRoomName = value[1];
         userName = value[2];
@@ -34,6 +34,14 @@ public class MessageResponse extends DTO {
 
     public String getChatRoomName() {
         return chatRoomName;
+    }
+    
+    public MessageType getMessageType() {
+        return messageType;
+    }
+
+    public String getMessage() {
+        return message;
     }
 
     @Override
