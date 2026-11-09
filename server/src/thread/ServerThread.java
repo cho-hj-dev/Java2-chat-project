@@ -354,11 +354,34 @@ public class ServerThread extends Thread {
                 break;
 
             case MESSAGE:
-                // [to 채팅방에 있는 다른 사용자] 메시지 전송
-                MessageResponse messageResponse = new MessageResponse(message);
-                sendMessage(messageResponse);
-                break;
+                // 클라이언트가 보낸 채팅 또는 그림 메시지를 해석한다.
+                MessageResponse received = new MessageResponse(message);
+                ChatRoom targetRoom =
+                        chatService.getChatRoom(received.getChatRoomName());
 
+                // 로그인한 사용자가 실제로 이 방에 들어와 있는지 확인한다.
+                if (loggedInUser == null || targetRoom == null
+                        || !targetRoom.getUsers().contains(loggedInUser)) {
+                    break;
+                }
+
+                // 이미지라면 크기와 PNG 형식을 검사한다.
+                if (received.getMessageType() == MessageType.IMAGE
+                        && !isValidDrawing(received.getMessage())) {
+                    System.err.println("잘못된 그림 메시지를 거부했습니다.");
+                    break;
+                }
+
+                // 닉네임은 클라이언트가 적어 보낸 값 대신 서버의 로그인 정보로 정한다.
+                // 따라서 다른 사용자의 이름을 임의로 적어 보낼 수 없다.
+                MessageResponse outgoing = new MessageResponse(
+                        received.getMessageType(),
+                        received.getChatRoomName(),
+                        loggedInUser.getName(),
+                        received.getMessage()
+                );
+                sendMessage(outgoing);
+                break;
             case CREATE_CHAT:
                 CreateChatRoomRequest createChatRoomReq = new CreateChatRoomRequest(message);
 
@@ -860,4 +883,42 @@ public class ServerThread extends Thread {
         }
     }
     
+    private static boolean isValidDrawing(String encoded) {
+        // Base64 문자열 자체가 지나치게 크면 디코딩 전에 거부한다.
+        if (encoded == null || encoded.length() > 350000) {
+            return false;
+        }
+
+        try {
+            byte[] png = java.util.Base64.getDecoder().decode(encoded);
+
+            // 그림판의 600×350 PNG만 받는다. PNG 최대 크기는 256 KiB다.
+            if (png.length < 24 || png.length > 256 * 1024) {
+                return false;
+            }
+
+            // PNG 파일 시작 부분의 고정된 서명을 확인한다.
+            int[] signature = {137, 80, 78, 71, 13, 10, 26, 10};
+            for (int i = 0; i < signature.length; i++) {
+                if ((png[i] & 0xff) != signature[i]) {
+                    return false;
+                }
+            }
+
+            // PNG 헤더에는 가로·세로 크기가 각각 4바이트로 기록된다.
+            int width = ((png[16] & 0xff) << 24)
+                    | ((png[17] & 0xff) << 16)
+                    | ((png[18] & 0xff) << 8)
+                    | (png[19] & 0xff);
+            int height = ((png[20] & 0xff) << 24)
+                    | ((png[21] & 0xff) << 16)
+                    | ((png[22] & 0xff) << 8)
+                    | (png[23] & 0xff);
+
+            return width == 600 && height == 350;
+        } catch (IllegalArgumentException exception) {
+            // Base64 형식이 아니면 그림 메시지로 취급하지 않는다.
+            return false;
+        }
+    }  
 }
