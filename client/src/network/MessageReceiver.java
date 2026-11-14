@@ -16,6 +16,8 @@ import java.nio.charset.StandardCharsets;
 import java.util.Base64;
 import view.frame.SignupFrame;
 
+import dto.request.WeatherRequest;
+
 public class MessageReceiver extends Thread {
 
     Socket socket;
@@ -139,7 +141,46 @@ public class MessageReceiver extends Thread {
 
                 LobbyFrame.chatRoomUserListPanel.paintChatUsers(Application.users); // 전체 리스트
                 LobbyFrame.chatRoomListPanel.paintChatRoomList();
+
+                // 로그인 초기 데이터를 받은 뒤 서버에 날씨를 요청한다.
+                if (!Application.sender.sendMessage(new WeatherRequest())) {
+                    LobbyFrame.chatRoomUserListPanel.setWeatherText("날씨: 요청 실패");
+                }
                 break;
+                
+            case WEATHER_RESULT: {
+                if ("ERROR".equals(message)) {
+                    LobbyFrame.chatRoomUserListPanel.setWeatherText(
+                            "날씨: 현재 조회할 수 없습니다.");
+                    break;
+                }
+
+                try {
+                    // 서버 응답: OK,Base64(지역),기온,Base64(설명)
+                    String[] values = message.split(",", 4);
+                    if (values.length != 4 || !"OK".equals(values[0])) {
+                        throw new IllegalArgumentException("잘못된 날씨 응답");
+                    }
+
+                    String city = new String(
+                            Base64.getDecoder().decode(values[1]),
+                            StandardCharsets.UTF_8);
+                    double temperature = Double.parseDouble(values[2]);
+                    String description = new String(
+                            Base64.getDecoder().decode(values[3]),
+                            StandardCharsets.UTF_8);
+
+                    String display = String.format(
+                            java.util.Locale.KOREAN,
+                            "현재 날씨 (%s): %.1f°C, %s",
+                            city, temperature, description);
+                    LobbyFrame.chatRoomUserListPanel.setWeatherText(display);
+                } catch (RuntimeException exception) {
+                    LobbyFrame.chatRoomUserListPanel.setWeatherText(
+                            "날씨: 응답을 표시할 수 없습니다.");
+                }
+                break;
+            }
 
             case MESSAGE:
                 MessageResponse messageRes = new MessageResponse(message);

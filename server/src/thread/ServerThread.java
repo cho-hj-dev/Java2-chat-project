@@ -35,12 +35,18 @@ import db.DBConnection;
 import service.SignupEmailService;
 import java.sql.Connection;
 
+import service.WeatherService;
+
 public class ServerThread extends Thread {
 
     Socket socket; // 담당자 (not 문지기)
 
     ChatService chatService;
     private User loggedInUser;
+    
+    //(7주차) 모든 접속 스레드가 같은 날씨 결과를 사용해야 10분 캐시가 작동한다.
+    private static final WeatherService WEATHER_SERVICE =
+            new WeatherService();
 
     public ServerThread(Socket socket, ChatService chatService) {
         this.socket = socket;
@@ -274,6 +280,38 @@ public class ServerThread extends Thread {
     private void processReceiveMessage(DtoType type, String message)
             throws UserNotFoundException, ChatRoomNotFoundException, ChatRoomExistException, IOException {
         switch (type) {
+        
+	        case WEATHER: {
+	            // 로그인한 사용자만 날씨를 요청할 수 있다.
+	            // 기존 run() 메서드의 로그인 검사도 이 요청에 적용된다.
+	            try {
+	                WeatherService.WeatherInfo weather =
+	                        WEATHER_SERVICE.getCurrentWeather();
+	
+	                // 지역명과 설명은 쉼표 등이 들어갈 수 있어 Base64로 전송한다.
+	                String city = java.util.Base64.getEncoder()
+	                        .encodeToString(weather.city().getBytes(
+	                                java.nio.charset.StandardCharsets.UTF_8));
+	                String description = java.util.Base64.getEncoder()
+	                        .encodeToString(weather.description().getBytes(
+	                                java.nio.charset.StandardCharsets.UTF_8));
+	
+	                writeResponse(socket,
+	                        "WEATHER_RESULT:OK,"
+	                        + city + ","
+	                        + weather.temperature() + ","
+	                        + description);
+	            } catch (InterruptedException exception) {
+	                Thread.currentThread().interrupt();
+	                writeResponse(socket, "WEATHER_RESULT:ERROR");
+	            } catch (IOException | IllegalStateException exception) {
+	                // API 키나 요청 URL은 출력하지 않고 오류 종류만 기록한다.
+	                System.err.println("날씨 조회 실패: "
+	                        + exception.getClass().getSimpleName());
+	                writeResponse(socket, "WEATHER_RESULT:ERROR");
+	            }
+	            break;
+	        }
         
 	        case ACCOUNT_RECOVERY: {
 	            handleAccountRecovery(message);

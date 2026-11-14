@@ -10,5 +10,6 @@
 	<classpathentry kind="lib" path="lib/mail/angus-activation-2.0.3.jar"/>
 	<classpathentry kind="lib" path="lib/mail/jakarta.activation-api-2.2.0-M1.jar"/>
 	<classpathentry kind="lib" path="lib/mail/jakarta.mail-2.0.5.jar"/>
+	<classpathentry kind="lib" path="lib/gson/gson-2.15.0.jar"/>
 	<classpathentry kind="output" path="bin"/>
 </classpath>

@@ -21,6 +21,10 @@ public class MessageSender {
             PrintWriter writer = new PrintWriter(socket.getOutputStream(), true);
 
             switch (type) {
+	            case WEATHER:
+	                // 서버에 현재 날씨 조회를 요청한다.
+	                writer.println((WeatherRequest) dto);
+	                break;
 	            case ACCOUNT_RECOVERY:
 	                writer.println((AccountRecoveryRequest) dto);
 	                break;
