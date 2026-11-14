@@ -1,6 +1,9 @@
 package dto.type;
 
 public enum DtoType {
+	WEATHER,         // 클라이언트 → 서버: 현재 날씨 요청
+	WEATHER_RESULT,  // 서버 → 클라이언트: 조회 결과
+	
 	ACCOUNT_RECOVERY,
 	ACCOUNT_RECOVERY_RESULT,
 	
