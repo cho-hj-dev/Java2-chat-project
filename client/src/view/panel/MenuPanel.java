@@ -1,5 +1,10 @@
 package view.panel;
 
+import domain.User;
+import dto.request.InviteChatRequest;
+import java.util.ArrayList;
+import java.util.List;
+
 import app.Application;
 import dto.request.ExitChatRequest;
 import view.frame.LobbyFrame;
@@ -17,6 +22,7 @@ public class MenuPanel extends JPanel {
 
     JButton exitBtn = new JButton("나가기");
     
+    private final JButton inviteBtn = new JButton("사용자 초대");
     private final JButton profileBtn = new JButton("내 프로필");
     private ProfileFrame profileFrame;
 
@@ -36,7 +42,7 @@ public class MenuPanel extends JPanel {
         add(createChatBtn);
         createChatBtn.setVisible(false); // 로비 채팅방, 생성된 채팅방에 따라 버튼 show, hide
 
-        exitBtn.setBounds(15, 10, 370, 35);
+        exitBtn.setBounds(205, 10, 180, 35);
         exitBtn.addActionListener(new ActionListener() {
             @Override
             public void actionPerformed(ActionEvent e) {
@@ -52,6 +58,11 @@ public class MenuPanel extends JPanel {
             }
         });
         add(exitBtn);
+        inviteBtn.setBounds(15, 10, 180, 35);
+        inviteBtn.addActionListener(event -> inviteUser(frame));
+        inviteBtn.setVisible(false); // 로비에는 초대 버튼을 표시하지 않는다.
+        add(inviteBtn);
+        
         createChatBtn.setVisible(false);
         
         profileBtn.setBounds(265, 10, 120, 35);
@@ -88,7 +99,83 @@ public class MenuPanel extends JPanel {
         }
     }
 
-    public void setExitBtnVisible(boolean bool) {
-        exitBtn.setVisible(bool);
+    public void setExitBtnVisible(boolean visible) {
+        exitBtn.setVisible(visible);
+    }
+
+    public void setInviteBtnVisible(boolean visible) {
+        // 그룹 방이면 초대·나가기 버튼을 나란히 보여준다.
+        // 1:1 방이면 나가기 버튼만 넓게 보여준다.
+        inviteBtn.setVisible(visible);
+        exitBtn.setBounds(
+                visible ? 205 : 15,
+                10,
+                visible ? 180 : 370,
+                35);
+    }
+    
+    private void inviteUser(JFrame frame) {
+        ChatPanel chatPanel = Application.chatPanelMap.get(chatRoomName);
+        if (chatPanel == null || Application.me == null) {
+            return;
+        }
+
+        List<User> roomUsers = chatPanel.getRoomUsers();
+        List<User> candidates = new ArrayList<>();
+
+        // 로비의 접속자 중 자신과 현재 방 참여자를 제외한다.
+        for (User onlineUser : Application.users) {
+            if (onlineUser.getId().equals(Application.me.getId())) {
+                continue;
+            }
+
+            boolean alreadyInRoom = roomUsers.stream()
+                    .anyMatch(roomUser ->
+                            roomUser.getId().equals(onlineUser.getId()));
+
+            if (!alreadyInRoom) {
+                candidates.add(onlineUser);
+            }
+        }
+
+        if (candidates.isEmpty()) {
+            JOptionPane.showMessageDialog(
+                    frame, "초대할 수 있는 접속 중인 사용자가 없습니다.");
+            return;
+        }
+
+        String[] choices = new String[candidates.size()];
+        for (int i = 0; i < candidates.size(); i++) {
+            User user = candidates.get(i);
+            choices[i] = user.getName() + " (" + user.getId() + ")";
+        }
+
+        Object selected = JOptionPane.showInputDialog(
+                frame,
+                "초대할 사용자를 선택하세요.",
+                "채팅방 초대",
+                JOptionPane.QUESTION_MESSAGE,
+                null,
+                choices,
+                choices[0]);
+
+        if (selected == null) {
+            return;
+        }
+
+        for (int i = 0; i < choices.length; i++) {
+            if (choices[i].equals(selected)) {
+                boolean sent = Application.sender.sendMessage(
+                        new InviteChatRequest(
+                                chatRoomName,
+                                candidates.get(i).getId()));
+
+                if (!sent) {
+                    JOptionPane.showMessageDialog(
+                            frame, "초대 요청을 보내지 못했습니다.");
+                }
+                return;
+            }
+        }
     }
 }

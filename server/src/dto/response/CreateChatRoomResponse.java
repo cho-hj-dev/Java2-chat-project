@@ -4,17 +4,17 @@ import domain.ChatRoom;
 import dto.type.DtoType;
 
 public class CreateChatRoomResponse extends DTO {
-
-    private String chatRoomName;
+    private final ChatRoom chatRoom;
 
     public CreateChatRoomResponse(ChatRoom chatRoom) {
         super(DtoType.CREATE_CHAT);
-
-        this.chatRoomName = chatRoom.getName();
+        this.chatRoom = chatRoom;
     }
 
     @Override
     public String toString() {
-        return super.toString() + chatRoomName ;
+        // 형식: CREATE_CHAT:방이름,방종류
+        return super.toString()
+                + chatRoom.getName() + "," + chatRoom.getType();
     }
 }

@@ -26,7 +26,8 @@ public class InitDataResponse extends DTO {
 
         if (chatRooms.size() != 0) {
             for (ChatRoom chatRoom : chatRooms) {
-                str += chatRoom.getName() + "|";
+            	// 로그인할 때도 방 종류를 전달한다.
+            	str += chatRoom.getName() + "," + chatRoom.getType() + "|";
             }
             str = str.substring(0, str.length()-1);
 

@@ -1,5 +1,9 @@
 package view.frame;
 
+import app.Application;
+import domain.ChatRoom;
+import domain.RoomType;
+
 import view.panel.ChatPanel;
 import view.panel.ChatRoomUserListPanel;
 import view.panel.MenuPanel;
@@ -19,6 +23,11 @@ public class ChatFrame extends JFrame implements WindowListener {
     MenuPanel menuPanel;
 
     public ChatFrame(String chatRoomName) {
+        // 로비 목록에서 방을 열 때 저장된 종류를 찾아 사용한다.
+        this(chatRoomName, findRoomType(chatRoomName));
+    }
+
+    public ChatFrame(String chatRoomName, RoomType roomType) {
         super(chatRoomName);
 
         setLayout(null);
@@ -29,10 +38,21 @@ public class ChatFrame extends JFrame implements WindowListener {
         chatRoomUserListPanel = new ChatRoomUserListPanel(this);
         menuPanel = new MenuPanel(this, chatRoomName);
         menuPanel.setExitBtnVisible(true);
+        menuPanel.setInviteBtnVisible(roomType == RoomType.GROUP);
 
         addWindowListener(this);
-
         setVisible(true);
+    }
+
+    private static RoomType findRoomType(String chatRoomName) {
+        for (ChatRoom room : Application.chatRooms) {
+            if (room.getName().equals(chatRoomName)) {
+                return room.getType();
+            }
+        }
+
+        // 종류를 확인할 수 없을 때는 초대 버튼을 숨긴다.
+        return RoomType.DIRECT;
     }
 
     public ChatPanel getChatPanel() {

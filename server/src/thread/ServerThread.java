@@ -5,6 +5,7 @@ import dao.ChatDao;
 import domain.ChatRoom;
 import domain.User;
 import domain.Member;
+import domain.RoomType;
 import java.util.Optional;
 import dto.request.*;
 import dto.response.*;
@@ -379,8 +380,8 @@ public class ServerThread extends Thread {
                 sendMessage(lobbyEnterMessageRes);
 
 
-                // [to 로그인 사용자] 초기 데이터 전송 (전체 사용자 리스트, 채팅방 리스트)
-                List<ChatRoom> chatRooms = chatService.getChatRooms();
+                // 그룹 방은 모두 볼 수 있고, 1:1 방은 참여자만 볼 수 있다.
+                List<ChatRoom> chatRooms = visibleRoomsFor(user);
                 List<User> users = chatService.getUsers();
 
                 InitDataResponse initRes = new InitDataResponse(chatRooms, users);
@@ -402,6 +403,57 @@ public class ServerThread extends Thread {
                         || !targetRoom.getUsers().contains(loggedInUser)) {
                     break;
                 }
+                
+	             // 귓속말은 방 전체에 전송하지 않고 지정한 참여자에게만 보낸다.
+	             // 요청 본문 형식: 수신자ID|Base64(메시지)
+	             if (received.getMessageType() == MessageType.WHISPER) {
+	                 String[] whisperParts = received.getMessage().split("\\|", 2);
+	                 if (whisperParts.length != 2) {
+	                     break;
+	                 }
+	
+	                 String targetId = whisperParts[0];
+	                 String whisperText;
+	
+	                 try {
+	                     whisperText = new String(
+	                             java.util.Base64.getDecoder().decode(whisperParts[1]),
+	                             java.nio.charset.StandardCharsets.UTF_8);
+	                 } catch (IllegalArgumentException exception) {
+	                     break;
+	                 }
+	
+	                 // 빈 메시지, 지나치게 긴 메시지, 줄바꿈이 포함된 요청은 거부한다.
+	                 if (whisperText.isBlank()
+	                         || whisperText.length() > 2000
+	                         || whisperText.indexOf('\n') >= 0
+	                         || whisperText.indexOf('\r') >= 0) {
+	                     break;
+	                 }
+	
+	                 User recipient = null;
+	                 for (User roomUser : targetRoom.getUsers()) {
+	                     if (roomUser.getId().equals(targetId)) {
+	                         recipient = roomUser;
+	                         break;
+	                     }
+	                 }
+	
+	                 // 수신자가 현재 이 방의 참여자인지 서버에서 다시 확인한다.
+	                 if (recipient == null || recipient == loggedInUser) {
+	                     break;
+	                 }
+	
+	                 MessageResponse whisper = new MessageResponse(
+	                         MessageType.WHISPER,
+	                         targetRoom.getName(),
+	                         loggedInUser.getName(),
+	                         whisperText);
+	
+	                 // 기존 sendMessage(outgoing)은 방 전체로 보내므로 여기서는 사용하지 않는다.
+	                 writeResponse(recipient.getSocket(), whisper);
+	                 break;
+	             }
 
                 // 이미지라면 크기와 PNG 형식을 검사한다.
                 if (received.getMessageType() == MessageType.IMAGE
@@ -420,26 +472,115 @@ public class ServerThread extends Thread {
                 );
                 sendMessage(outgoing);
                 break;
-            case CREATE_CHAT:
-                CreateChatRoomRequest createChatRoomReq = new CreateChatRoomRequest(message);
+                
+            case CREATE_CHAT: {
+                try {
+                    CreateChatRoomRequest request =
+                            new CreateChatRoomRequest(message);
 
-                ChatRoom chatRoom = chatService.createChatRoom(createChatRoomReq.getName(), createChatRoomReq.getUserId());
-                chatService.enterChatRoom(chatRoom.getName(), createChatRoomReq.getUserId());
+                    // 생성자는 요청에 적힌 ID가 아니라 이 소켓에서 로그인한 사용자다.
+                    if (!loggedInUser.getId().equals(request.getUserId())) {
+                        break;
+                    }
 
-                // 새로 생성된 방 정보 전송
-                CreateChatRoomResponse createChatRoomRes = new CreateChatRoomResponse(chatRoom);
-                sendMessage(createChatRoomRes);
+                    User target = null;
+                    if (request.getRoomType() == RoomType.DIRECT) {
+                        // 1:1 상대는 현재 접속 중인 사용자여야 한다.
+                        target = chatService.getUser(request.getTargetUserId());
+                    }
 
-                // [to 채팅방에 있는 모든 사용자 (나 자신 포함)] 사용자 리스트 전송
-                UserListResponse chatRoomUserListRes = new UserListResponse(chatRoom.getName(), chatService.getChatRoomUsers(chatRoom.getName()));
-                sendMessage(chatRoomUserListRes);
+                    ChatRoom room = chatService.createChatRoom(
+                            request.getName(),
+                            request.getRoomType(),
+                            loggedInUser,
+                            target);
+
+                    CreateChatRoomResponse created =
+                            new CreateChatRoomResponse(room);
+
+                    if (room.getType() == RoomType.DIRECT) {
+                        // 1:1 방 이름은 생성자와 지정한 상대에게만 전달한다.
+                        writeResponse(loggedInUser.getSocket(), created);
+                        writeResponse(target.getSocket(), created);
+                    } else {
+                        // 그룹 방은 기존처럼 접속자들의 로비 목록에 알린다.
+                        sendMessage(created);
+                    }
+
+                    // 생성자는 곧 방 화면을 열므로 참여자 목록을 보내준다.
+                    // 상대는 아직 방 화면을 열지 않았으므로 여기서는 보내지 않는다.
+                    writeResponse(socket, new UserListResponse(
+                            room.getName(),
+                            new java.util.ArrayList<>(room.getUsers())));
+
+                } catch (IllegalArgumentException
+                        | ChatRoomExistException exception) {
+                    System.err.println(
+                            "채팅방 생성 실패: "
+                            + exception.getClass().getSimpleName());
+                }
                 break;
+            }
+            
+            case INVITE_CHAT: {
+                // 요청 형식: 채팅방이름,초대받을사용자ID
+                String[] values = message.split(",", -1);
+                if (values.length != 2) {
+                    writeResponse(socket, "INVITE_CHAT_RESULT:INVALID");
+                    break;
+                }
+
+                String roomName = values[0];
+                String targetId = values[1];
+                ChatRoom room = chatService.getChatRoom(roomName);
+                User target = chatService.getUser(targetId);
+
+                // 실제 방 참여자만 초대할 수 있다.
+                // 1:1 방은 인원을 늘릴 수 없으므로 초대 대상에서 제외한다.
+                if (room == null
+                        || room.getType() != RoomType.GROUP
+                        || !room.getUsers().contains(loggedInUser)
+                        || target == null
+                        || target == loggedInUser
+                        || room.getUsers().contains(target)) {
+                    writeResponse(socket, "INVITE_CHAT_RESULT:INVALID");
+                    break;
+                }
+
+                // 방 이름과 초대한 사람의 닉네임을 안전하게 전송한다.
+                String encodedRoom = java.util.Base64.getEncoder()
+                        .encodeToString(roomName.getBytes(
+                                java.nio.charset.StandardCharsets.UTF_8));
+                String encodedInviter = java.util.Base64.getEncoder()
+                        .encodeToString(loggedInUser.getName().getBytes(
+                                java.nio.charset.StandardCharsets.UTF_8));
+
+                writeResponse(target.getSocket(),
+                        "INVITE_CHAT:" + encodedRoom + "," + encodedInviter);
+                writeResponse(socket, "INVITE_CHAT_RESULT:SENT");
+                break;
+            }
 
             case ENTER_CHAT:
                 // 서버에 채팅방에 들어온 사용자 설정
                 EnterChatRequest enterChatReq = new EnterChatRequest(message);
                 String enterChatRoomName = enterChatReq.getChatRoomName();
                 String userId = enterChatReq.getUserId();
+                // 요청의 사용자 ID가 현재 로그인한 사용자와 일치해야 한다.
+                if (!loggedInUser.getId().equals(userId)) {
+                    break;
+                }
+
+                ChatRoom requestedRoom = chatService.getChatRoom(enterChatRoomName);
+                if (requestedRoom == null) {
+                    break;
+                }
+
+                // 1:1 방은 생성 시 등록된 두 사람만 다시 입장할 수 있다.
+                if (requestedRoom.getType() == RoomType.DIRECT
+                        && !requestedRoom.getUsers().contains(loggedInUser)) {
+                    break;
+                }
                 chatService.enterChatRoom(enterChatRoomName, userId);
 
                 // [to 채팅방에 있는 다른 사용자] 입장 메시지 전송
@@ -452,31 +593,54 @@ public class ServerThread extends Thread {
                 sendMessage(enterChatRoomUserListRes);
 
                 break;
-            case EXIT_CHAT:
-                ExitChatRequest exitChatReq = new ExitChatRequest(message);
-                ChatRoom exitChatRoom = chatService.getChatRoom(exitChatReq.getChatRoomName());
-                String exitChatRoomName = exitChatRoom.getName();
-                User exitUser = chatService.exitChatRoom(exitChatReq.getChatRoomName(), exitChatReq.getUserId());
+            case EXIT_CHAT: {
+                ExitChatRequest request = new ExitChatRequest(message);
 
-                if (exitChatRoom.ieExistUser()) {
-                    // [to 채팅방에 있는 다른 사용자] 퇴장 메시지 전송
-                    MessageResponse chatRoomExitMessageRes = new MessageResponse(MessageType.EXIT, exitChatReq.getChatRoomName(), exitUser.getName(), exitUser.getExitString());
-                    sendMessage(chatRoomExitMessageRes);
-
-                    // [to 채팅방에 있는 모든 사용자 (나 자신 포함)] 사용자 리스트 전송
-                    UserListResponse exitChatRoomUserListRes = new UserListResponse(exitChatRoomName, chatService.getChatRoomUsers(exitChatRoomName));
-                    sendMessage(exitChatRoomUserListRes);
+                // 다른 사용자의 ID로 퇴장 요청을 보낼 수 없게 한다.
+                if (!loggedInUser.getId().equals(request.getUserId())) {
+                    break;
                 }
 
-                // 채팅방에 더 이상 사용자가 없는 경우
-                // 채팅방 목록 갱신
-                else {
-                    ChatRoomListResponse chatRoomListRes = new ChatRoomListResponse(chatService.getChatRooms());
-                    sendMessage(chatRoomListRes);
+                ChatRoom room = chatService.getChatRoom(request.getChatRoomName());
+                if (room == null || !room.getUsers().contains(loggedInUser)) {
+                    break;
                 }
 
+                String roomName = room.getName();
+                User exitUser = chatService.exitChatRoom(
+                        roomName, loggedInUser.getId());
+
+                if (room.ieExistUser()) {
+                    // 방에 남은 사람들에게 퇴장과 참여자 목록을 알린다.
+                    sendMessage(new MessageResponse(
+                            MessageType.EXIT,
+                            roomName,
+                            exitUser.getName(),
+                            exitUser.getExitString()));
+
+                    sendMessage(new UserListResponse(
+                            roomName,
+                            new java.util.ArrayList<>(room.getUsers())));
+                }
+
+                // 각 사용자에게 자신이 볼 수 있는 방 목록을 다시 보낸다.
+                sendMessage(new ChatRoomListResponse(chatService.getChatRooms()));
                 break;
+            }
         }
+    }
+    
+    private List<ChatRoom> visibleRoomsFor(User viewer) {
+        List<ChatRoom> visible = new java.util.ArrayList<>();
+
+        for (ChatRoom room : chatService.getChatRooms()) {
+            // 그룹 방은 모두에게, 1:1 방은 참여자에게만 보여준다.
+            if (room.getType() == RoomType.GROUP
+                    || room.getUsers().contains(viewer)) {
+                visible.add(room);
+            }
+        }
+        return visible;
     }
 
     private void writeResponse(Socket target, Object response) {
@@ -534,15 +698,21 @@ public class ServerThread extends Thread {
             }
 
             case CREATE_CHAT:
-            case CHAT_ROOM_LIST:
+                // 그룹 채팅방 생성 알림에만 사용한다.
                 for (Socket target :
                         new java.util.ArrayList<>(Application.sockets)) {
-
                     writeResponse(target, dto);
                 }
                 break;
 
-            default:
+            case CHAT_ROOM_LIST:
+                // 각 사용자에게 자신이 볼 수 있는 방 목록만 전송한다.
+                for (User viewer :
+                        new java.util.ArrayList<>(chatService.getUsers())) {
+                    writeResponse(
+                            viewer.getSocket(),
+                            new ChatRoomListResponse(visibleRoomsFor(viewer)));
+                }
                 break;
         }
     }
