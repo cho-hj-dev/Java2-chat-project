@@ -14,6 +14,8 @@ import javax.swing.*;
 import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
 
+import view.frame.NotepadFrame;
+
 public class MenuPanel extends JPanel {
 
     String chatRoomName;
@@ -25,13 +27,15 @@ public class MenuPanel extends JPanel {
     private final JButton inviteBtn = new JButton("사용자 초대");
     private final JButton profileBtn = new JButton("내 프로필");
     private ProfileFrame profileFrame;
+    private final JButton toolsBtn = new JButton("도구");
+    private final JPopupMenu toolsMenu = new JPopupMenu();
 
     public MenuPanel(JFrame frame, String chatRoomName) {
         setLayout(null);
 
         this.chatRoomName = chatRoomName;
 
-        createChatBtn.setBounds(15, 10, 240, 35);
+        createChatBtn.setBounds(15, 10, 175, 35);
         createChatBtn.addActionListener(new ActionListener() {
             @Override
             public void actionPerformed(ActionEvent e) {
@@ -40,6 +44,20 @@ public class MenuPanel extends JPanel {
             }
         });
         add(createChatBtn);
+        
+        JMenuItem notepadItem = new JMenuItem("메모장");
+        notepadItem.addActionListener(event -> new NotepadFrame());
+        toolsMenu.add(notepadItem);
+
+        toolsBtn.setBounds(200, 10, 85, 35);
+        toolsBtn.addActionListener(event -> {
+            // 하단 버튼이므로 메뉴를 버튼 위쪽으로 펼친다.
+            toolsMenu.show(
+                    toolsBtn, 0, -toolsMenu.getPreferredSize().height);
+        });
+        toolsBtn.setVisible(false);
+        add(toolsBtn);
+        
         createChatBtn.setVisible(false); // 로비 채팅방, 생성된 채팅방에 따라 버튼 show, hide
 
         exitBtn.setBounds(205, 10, 180, 35);
@@ -65,7 +83,7 @@ public class MenuPanel extends JPanel {
         
         createChatBtn.setVisible(false);
         
-        profileBtn.setBounds(265, 10, 120, 35);
+        profileBtn.setBounds(295, 10, 90, 35);
         profileBtn.setVisible(false);
 
         profileBtn.addActionListener(e -> {
@@ -91,6 +109,7 @@ public class MenuPanel extends JPanel {
     }
 
     public void setCreateChatBtnVisible(boolean bool) {
+    	toolsBtn.setVisible(bool);
         createChatBtn.setVisible(bool);
         profileBtn.setVisible(bool);
 
