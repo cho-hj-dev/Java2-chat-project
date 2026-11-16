@@ -16,6 +16,8 @@ import java.awt.event.ActionListener;
 
 import view.frame.NotepadFrame;
 
+import view.frame.TicTacToeFrame;
+
 public class MenuPanel extends JPanel {
 
     String chatRoomName;
@@ -48,6 +50,11 @@ public class MenuPanel extends JPanel {
         JMenuItem notepadItem = new JMenuItem("메모장");
         notepadItem.addActionListener(event -> new NotepadFrame());
         toolsMenu.add(notepadItem);
+        
+     // 로비의 도구 메뉴에서 독립적인 틱택토 창을 연다.
+        JMenuItem gameItem = new JMenuItem("틱택토");
+        gameItem.addActionListener(event -> new TicTacToeFrame());
+        toolsMenu.add(gameItem);
 
         toolsBtn.setBounds(200, 10, 85, 35);
         toolsBtn.addActionListener(event -> {
