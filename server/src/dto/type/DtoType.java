@@ -1,6 +1,9 @@
 package dto.type;
 
 public enum DtoType {
+	SCHEDULE,         // 클라이언트 → 서버: 일정 CRUD 요청
+	SCHEDULE_RESULT,  // 서버 → 클라이언트: 일정 처리 결과
+	
 	INVITE_CHAT,         // 클라이언트 → 서버: 그룹 방 초대 요청
 	INVITE_CHAT_RESULT,  // 서버 → 요청자: 초대 요청 결과
 	

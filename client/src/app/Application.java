@@ -45,6 +45,8 @@ public class Application {
     public static Map<String, ChatRoomUserListPanel> chatRoomUserListPanelMap = new HashMap<>();
 
     public static final String LOBBY_CHAT_NAME = "Lobby"; // 로비 채팅방 이름
+    
+    public static view.frame.CalendarFrame calendarFrame;
 
     public Application() {
         try {

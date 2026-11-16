@@ -62,6 +62,10 @@ public class MessageSender {
                 case MESSAGE:
                     writer.println((MessageRequest) dto);
                     break;
+                case SCHEDULE:
+                    writer.println((ScheduleRequest) dto);
+                    break;
+                   
             }
 
             writer.flush();
