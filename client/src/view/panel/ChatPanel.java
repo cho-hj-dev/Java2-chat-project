@@ -3,7 +3,12 @@ package view.panel;
 import app.Application;
 import dto.request.MessageRequest;
 import dto.type.MessageType;
+
 import view.frame.DrawingFrame;
+import domain.User;
+import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.List;
 
 import java.awt.Image;
 import java.awt.event.ActionEvent;
@@ -38,6 +43,10 @@ public class ChatPanel extends JPanel implements ActionListener {
     private final JTextField msgTextF = new JTextField(50);
     private final JButton sendBtn = new JButton("전송");
     private final JButton drawingBtn = new JButton("그림판");
+    private final JButton whisperBtn = new JButton("귓속말");
+
+	 // 서버가 보내준 현재 방 참여자 목록이다.
+	 private List<User> roomUsers = new ArrayList<>();
 
     public ChatPanel(JFrame frame, String chatRoomName) {
         this.frame = frame;
@@ -51,14 +60,18 @@ public class ChatPanel extends JPanel implements ActionListener {
         scrollPane.setBounds(10, 0, 380, 450);
         add(scrollPane);
 
-        msgTextF.setBounds(10, 460, 210, 35);
+        msgTextF.setBounds(10, 460, 150, 35);
         add(msgTextF);
 
-        sendBtn.setBounds(230, 460, 75, 35);
+        sendBtn.setBounds(165, 460, 65, 35);
         sendBtn.addActionListener(this);
         add(sendBtn);
 
-        drawingBtn.setBounds(310, 460, 80, 35);
+        whisperBtn.setBounds(235, 460, 75, 35);
+        whisperBtn.addActionListener(event -> sendWhisper());
+        add(whisperBtn);
+
+        drawingBtn.setBounds(315, 460, 75, 35);
         drawingBtn.addActionListener(event ->
                 new DrawingFrame(frame, this::sendDrawing));
         add(drawingBtn);
@@ -70,6 +83,9 @@ public class ChatPanel extends JPanel implements ActionListener {
             MessageType messageType, String userName, String message) {
 
         switch (messageType) {
+	        case WHISPER:
+	            appendText("[귓속말] " + userName + ": " + message + "\n");
+	            break;
             case ENTER:
             case EXIT:
                 appendText(message + "\n");
@@ -104,6 +120,90 @@ public class ChatPanel extends JPanel implements ActionListener {
 
             default:
                 break;
+        }
+    }
+    
+    public void setRoomUsers(List<User> users) {
+        // 화면의 대상 선택에 사용할 목록을 복사해 보관한다.
+        roomUsers = new ArrayList<>(users);
+    }
+    
+    public List<User> getRoomUsers() {
+        // 초대 대상 목록에서 현재 방 참여자를 제외할 때 사용한다.
+        return new ArrayList<>(roomUsers);
+    }
+
+    private void sendWhisper() {
+        String message = msgTextF.getText();
+
+        if (message.isBlank() || message.length() > 2000) {
+            JOptionPane.showMessageDialog(
+                    frame, "귓속말은 1~2000자로 입력해주세요.");
+            return;
+        }
+
+        // 자신을 제외하고 현재 방에 있는 사용자만 선택지로 보여준다.
+        List<User> recipients = new ArrayList<>();
+        for (User user : roomUsers) {
+            if (!user.getId().equals(Application.me.getId())) {
+                recipients.add(user);
+            }
+        }
+
+        if (recipients.isEmpty()) {
+            JOptionPane.showMessageDialog(
+                    frame, "귓속말을 보낼 다른 참여자가 없습니다.");
+            return;
+        }
+
+        // 닉네임이 같아도 구분할 수 있도록 ID를 함께 표시한다.
+        String[] choices = new String[recipients.size()];
+        for (int i = 0; i < recipients.size(); i++) {
+            User user = recipients.get(i);
+            choices[i] = user.getName() + " (" + user.getId() + ")";
+        }
+
+        Object selected = JOptionPane.showInputDialog(
+                frame,
+                "귓속말을 받을 사람을 선택하세요.",
+                "귓속말",
+                JOptionPane.QUESTION_MESSAGE,
+                null,
+                choices,
+                choices[0]);
+
+        if (selected == null) {
+            return; // 사용자가 선택 창을 취소했다.
+        }
+
+        for (int i = 0; i < choices.length; i++) {
+            if (!choices[i].equals(selected)) {
+                continue;
+            }
+
+            User recipient = recipients.get(i);
+
+            // 서버가 해석하는 형식: 수신자ID|Base64(메시지)
+            String encodedMessage = Base64.getEncoder().encodeToString(
+                    message.getBytes(StandardCharsets.UTF_8));
+            String payload = recipient.getId() + "|" + encodedMessage;
+
+            boolean sent = Application.sender.sendMessage(
+                    new MessageRequest(
+                            MessageType.WHISPER,
+                            chatRoomName,
+                            Application.me.getName(),
+                            payload));
+
+            if (sent) {
+                appendText("[내 귓속말 → " + recipient.getName()
+                        + "] " + message + "\n");
+                msgTextF.setText("");
+            } else {
+                JOptionPane.showMessageDialog(
+                        frame, "귓속말을 전송하지 못했습니다.");
+            }
+            return;
         }
     }
 

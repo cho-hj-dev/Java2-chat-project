@@ -19,9 +19,13 @@ public class ChatRoomListResponse extends DTO {
     public String toString() {
         String str = super.toString();
 
-        for (ChatRoom chatRoom : chatRooms) {
-            str += chatRoom.getName() + ",";
+        // 각 방을 '방이름,방종류'로 묶고 |로 구분한다.
+        for (ChatRoom room : chatRooms) {
+            str += room.getName() + "," + room.getType() + "|";
         }
-        return (chatRooms.size() > 0) ? str.substring(0, str.length() - 1) : str + "empty";
+
+        return chatRooms.isEmpty()
+                ? str + "empty"
+                : str.substring(0, str.length() - 1);
     }
 }

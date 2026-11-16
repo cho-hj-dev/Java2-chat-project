@@ -1,5 +1,9 @@
 package network;
 
+import dto.request.EnterChatRequest;
+import view.frame.ChatFrame;
+import javax.swing.JOptionPane;
+
 import app.Application;
 import domain.ChatRoom;
 import dto.response.*;
@@ -15,6 +19,7 @@ import javax.swing.SwingUtilities;
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;
 import view.frame.SignupFrame;
+import view.panel.ChatPanel;
 
 import dto.request.WeatherRequest;
 
@@ -181,6 +186,70 @@ public class MessageReceiver extends Thread {
                 }
                 break;
             }
+            
+            case INVITE_CHAT_RESULT: {
+                if ("SENT".equals(message)) {
+                    JOptionPane.showMessageDialog(
+                            Application.lobbyFrame, "초대 알림을 보냈습니다.");
+                } else {
+                    JOptionPane.showMessageDialog(
+                            Application.lobbyFrame,
+                            "초대할 수 없습니다. 그룹 방과 참여자 상태를 확인해주세요.");
+                }
+                break;
+            }
+
+            case INVITE_CHAT: {
+                // 서버 응답: Base64(방이름),Base64(초대한 사람 닉네임)
+                String[] values = message.split(",", 2);
+                if (values.length != 2) {
+                    break;
+                }
+
+                String roomName = new String(
+                        Base64.getDecoder().decode(values[0]),
+                        StandardCharsets.UTF_8);
+                String inviterName = new String(
+                        Base64.getDecoder().decode(values[1]),
+                        StandardCharsets.UTF_8);
+
+                int answer = JOptionPane.showConfirmDialog(
+                        Application.lobbyFrame,
+                        inviterName + "님이 [" + roomName
+                                + "] 채팅방에 초대했습니다.\n입장할까요?",
+                        "채팅방 초대",
+                        JOptionPane.YES_NO_OPTION);
+
+                if (answer != JOptionPane.YES_OPTION) {
+                    break;
+                }
+
+                // 이미 열려 있다면 중복 창을 만들지 않는다.
+                if (Application.chatPanelMap.containsKey(roomName)) {
+                    JOptionPane.showMessageDialog(
+                            Application.lobbyFrame, "이미 열려 있는 채팅방입니다.");
+                    break;
+                }
+
+                ChatFrame chatFrame = new ChatFrame(roomName);
+                Application.chatPanelMap.put(
+                        roomName, chatFrame.getChatPanel());
+                Application.chatRoomUserListPanelMap.put(
+                        roomName, chatFrame.getChatRoomUserListPanel());
+
+                // 기존 채팅방 입장 요청을 재사용한다.
+                boolean sent = Application.sender.sendMessage(
+                        new EnterChatRequest(roomName, Application.me.getId()));
+
+                if (!sent) {
+                    Application.chatPanelMap.remove(roomName);
+                    Application.chatRoomUserListPanelMap.remove(roomName);
+                    chatFrame.dispose();
+                    JOptionPane.showMessageDialog(
+                            Application.lobbyFrame, "채팅방 입장 요청에 실패했습니다.");
+                }
+                break;
+            }
 
             case MESSAGE:
                 MessageResponse messageRes = new MessageResponse(message);
@@ -191,16 +260,34 @@ public class MessageReceiver extends Thread {
                 CreateChatRoomResponse createChatRoomResponse = new CreateChatRoomResponse(message);
                 String chatRoomName = createChatRoomResponse.getName();
 
-                ChatRoom newChatRoom = new ChatRoom(chatRoomName);
+                // 알림에 포함된 방 종류를 클라이언트 목록에도 보관한다.
+                ChatRoom newChatRoom = new ChatRoom(
+                        chatRoomName, createChatRoomResponse.getType());
                 Application.chatRooms.add(newChatRoom);
 
                 LobbyFrame.chatRoomListPanel.addChatRoomLabel(chatRoomName); // 새로 생성된 채팅방을 채팅방 목록에 추가
                 break;
 
-            case USER_LIST:
+            case USER_LIST: {
                 UserListResponse userListRes = new UserListResponse(message);
-                Application.chatRoomUserListPanelMap.get(userListRes.getChatRoomName()).paintChatUsers(userListRes.getUsers()); // 갱신된 채팅방 사용자 리스트 설정
+
+                // 로비 사용자 목록은 1:1 대화 상대 선택에도 사용한다.
+                if (Application.LOBBY_CHAT_NAME.equals(
+                        userListRes.getChatRoomName())) {
+                    Application.users = userListRes.getUsers();
+                }
+
+                Application.chatRoomUserListPanelMap
+                        .get(userListRes.getChatRoomName())
+                        .paintChatUsers(userListRes.getUsers());
+	             // 귓속말 대상 선택에도 같은 방 참여자 목록을 사용한다.
+	                ChatPanel panel = Application.chatPanelMap.get(
+	                        userListRes.getChatRoomName());
+	                if (panel != null) {
+	                    panel.setRoomUsers(userListRes.getUsers());
+	                }
                 break;
+            }
 
             case CHAT_ROOM_LIST:
                 ChatRoomListResponse chatRoomListRes = new ChatRoomListResponse(message);

@@ -1,6 +1,9 @@
 package dto.type;
 
 public enum DtoType {
+	INVITE_CHAT,         // 클라이언트 → 서버: 그룹 방 초대 요청
+	INVITE_CHAT_RESULT,  // 서버 → 요청자: 초대 요청 결과
+	
 	WEATHER,         // 클라이언트 → 서버: 현재 날씨 요청
 	WEATHER_RESULT,  // 서버 → 클라이언트: 조회 결과
 	
