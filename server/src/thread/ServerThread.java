@@ -38,6 +38,8 @@ import java.sql.Connection;
 
 import service.WeatherService;
 
+import service.ScheduleService;
+
 public class ServerThread extends Thread {
 
     Socket socket; // 담당자 (not 문지기)
@@ -281,7 +283,17 @@ public class ServerThread extends Thread {
     private void processReceiveMessage(DtoType type, String message)
             throws UserNotFoundException, ChatRoomNotFoundException, ChatRoomExistException, IOException {
         switch (type) {
-        
+	        case SCHEDULE: {
+	            // 사용자 ID는 요청 본문이 아니라 로그인한 소켓에서 가져온다.
+	            String result = new ScheduleService().handle(
+	                    loggedInUser.getMemberId(), message);
+	
+	            writeResponse(
+	                    socket,
+	                    DtoType.SCHEDULE_RESULT + ":" + result);
+	            break;
+	        }
+	        
 	        case WEATHER: {
 	            // 로그인한 사용자만 날씨를 요청할 수 있다.
 	            // 기존 run() 메서드의 로그인 검사도 이 요청에 적용된다.

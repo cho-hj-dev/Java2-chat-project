@@ -82,6 +82,14 @@ public class MessageReceiver extends Thread {
     	        && type != DtoType.ACCOUNT_RECOVERY_RESULT) return;
 
         switch (type) {
+	        case SCHEDULE_RESULT: {
+	            // 이 메서드는 이미 Swing 이벤트 스레드에서 호출된다.
+	            if (Application.calendarFrame != null
+	                    && Application.calendarFrame.isDisplayable()) {
+	                Application.calendarFrame.showScheduleResult(message);
+	            }
+	            break;
+	        }
         
 	        case ACCOUNT_RECOVERY_RESULT: {
 	            if (Application.findIdFrame != null) {

@@ -18,6 +18,8 @@ import view.frame.NotepadFrame;
 
 import view.frame.TicTacToeFrame;
 
+import view.frame.CalendarFrame;
+
 public class MenuPanel extends JPanel {
 
     String chatRoomName;
@@ -50,6 +52,18 @@ public class MenuPanel extends JPanel {
         JMenuItem notepadItem = new JMenuItem("메모장");
         notepadItem.addActionListener(event -> new NotepadFrame());
         toolsMenu.add(notepadItem);
+        
+        JMenuItem calendarItem = new JMenuItem("일정 관리");
+        calendarItem.addActionListener(event -> {
+            // 이미 열린 달력 창이 있으면 새로 만들지 않고 앞으로 가져온다.
+            if (Application.calendarFrame == null
+                    || !Application.calendarFrame.isDisplayable()) {
+                Application.calendarFrame = new CalendarFrame();
+            } else {
+                Application.calendarFrame.toFront();
+            }
+        });
+        toolsMenu.add(calendarItem);
         
      // 로비의 도구 메뉴에서 독립적인 틱택토 창을 연다.
         JMenuItem gameItem = new JMenuItem("틱택토");

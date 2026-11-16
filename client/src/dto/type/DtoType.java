@@ -1,6 +1,9 @@
 package dto.type;
 
 public enum DtoType {
+	SCHEDULE,
+	SCHEDULE_RESULT,
+	
 	INVITE_CHAT,
 	INVITE_CHAT_RESULT,
 	
