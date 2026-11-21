@@ -40,12 +40,15 @@ import service.WeatherService;
 
 import service.ScheduleService;
 
+import dao.ChatMessageDao;
+
 public class ServerThread extends Thread {
 
     Socket socket; // 담당자 (not 문지기)
 
     ChatService chatService;
     private User loggedInUser;
+    private final ChatMessageDao chatMessageDao = new ChatMessageDao();
     
     //(7주차) 모든 접속 스레드가 같은 날씨 결과를 사용해야 10분 캐시가 작동한다.
     private static final WeatherService WEATHER_SERVICE =
@@ -461,6 +464,21 @@ public class ServerThread extends Thread {
 	                         targetRoom.getName(),
 	                         loggedInUser.getName(),
 	                         whisperText);
+	                 
+	                 // 수신자에게 전달하기 전에 귓속말과 수신자 ID를 저장한다.
+	                 try {
+	                     chatMessageDao.save(
+	                             targetRoom.getName(),
+	                             loggedInUser.getMemberId(),
+	                             recipient.getMemberId(),
+	                             MessageType.WHISPER,
+	                             whisperText);
+	                 } catch (SQLException exception) {
+	                     System.err.println(
+	                             "귓속말 저장 실패: "
+	                             + exception.getClass().getSimpleName());
+	                     break;
+	                 }
 	
 	                 // 기존 sendMessage(outgoing)은 방 전체로 보내므로 여기서는 사용하지 않는다.
 	                 writeResponse(recipient.getSocket(), whisper);
@@ -473,6 +491,27 @@ public class ServerThread extends Thread {
                     System.err.println("잘못된 그림 메시지를 거부했습니다.");
                     break;
                 }
+                
+	             // 일반 채팅과 그림만 이 경로로 저장한다.
+	             // 귓속말은 위 분기에서 이미 처리했다.
+	             if (received.getMessageType() != MessageType.CHAT
+	                     && received.getMessageType() != MessageType.IMAGE) {
+	                 break;
+	             }
+	
+	             try {
+	                 chatMessageDao.save(
+	                         targetRoom.getName(),
+	                         loggedInUser.getMemberId(),
+	                         null,
+	                         received.getMessageType(),
+	                         received.getMessage());
+	             } catch (SQLException exception) {
+	                 System.err.println(
+	                         "메시지 저장 실패: "
+	                         + exception.getClass().getSimpleName());
+	                 break;
+	             }
 
                 // 닉네임은 클라이언트가 적어 보낸 값 대신 서버의 로그인 정보로 정한다.
                 // 따라서 다른 사용자의 이름을 임의로 적어 보낼 수 없다.
@@ -515,8 +554,9 @@ public class ServerThread extends Thread {
                         writeResponse(loggedInUser.getSocket(), created);
                         writeResponse(target.getSocket(), created);
                     } else {
-                        // 그룹 방은 기존처럼 접속자들의 로비 목록에 알린다.
-                        sendMessage(created);
+                    	// 그룹방도 참여자에게만 목록을 보여준다.
+                        // 다른 사용자는 초대를 수락한 뒤 목록에 추가된다.
+                        writeResponse(loggedInUser.getSocket(), created);
                     }
 
                     // 생성자는 곧 방 화면을 열므로 참여자 목록을 보내준다.
@@ -588,11 +628,12 @@ public class ServerThread extends Thread {
                     break;
                 }
 
-                // 1:1 방은 생성 시 등록된 두 사람만 다시 입장할 수 있다.
-                if (requestedRoom.getType() == RoomType.DIRECT
-                        && !requestedRoom.getUsers().contains(loggedInUser)) {
-                    break;
-                }
+	             // 접속 중인 사용자 목록은 서버 재시작 시 비워진다.
+	             // 1:1 방의 입장 자격은 DB에서 복원한 참여자 ID로 확인한다.
+	             if (requestedRoom.getType() == RoomType.DIRECT
+	                     && !requestedRoom.hasMember(loggedInUser.getMemberId())) {
+	                 break;
+	             }
                 chatService.enterChatRoom(enterChatRoomName, userId);
 
                 // [to 채팅방에 있는 다른 사용자] 입장 메시지 전송
@@ -603,40 +644,75 @@ public class ServerThread extends Thread {
                 // [to 채팅방에 있는 모든 사용자 (나 자신 포함)] 사용자 리스트 전송
                 UserListResponse enterChatRoomUserListRes = new UserListResponse(enterChatRoomName, chatService.getChatRoomUsers(enterChatRoomName));
                 sendMessage(enterChatRoomUserListRes);
+                
+	             // 그룹방 초대를 수락해 처음 입장한 경우에도
+	             // 새 참여 관계가 로비의 방 목록에 반영되게 한다.
+	             writeResponse(
+	                     loggedInUser.getSocket(),
+	                     new ChatRoomListResponse(visibleRoomsFor(loggedInUser)));
 
                 break;
+                
             case EXIT_CHAT: {
                 ExitChatRequest request = new ExitChatRequest(message);
 
-                // 다른 사용자의 ID로 퇴장 요청을 보낼 수 없게 한다.
+                // 요청자가 실제 로그인 사용자이고, 이 방의 참여자인지 확인한다.
                 if (!loggedInUser.getId().equals(request.getUserId())) {
+                    writeResponse(socket, "EXIT_CHAT_RESULT:ERROR");
                     break;
                 }
 
-                ChatRoom room = chatService.getChatRoom(request.getChatRoomName());
-                if (room == null || !room.getUsers().contains(loggedInUser)) {
+                ChatRoom room = chatService.getChatRoom(
+                        request.getChatRoomName());
+
+                if (room == null
+                        || !room.hasMember(loggedInUser.getMemberId())
+                        || !room.getUsers().contains(loggedInUser)) {
+                    writeResponse(socket, "EXIT_CHAT_RESULT:ERROR");
                     break;
                 }
 
                 String roomName = room.getName();
-                User exitUser = chatService.exitChatRoom(
-                        roomName, loggedInUser.getId());
 
-                if (room.ieExistUser()) {
-                    // 방에 남은 사람들에게 퇴장과 참여자 목록을 알린다.
-                    sendMessage(new MessageResponse(
-                            MessageType.EXIT,
-                            roomName,
-                            exitUser.getName(),
-                            exitUser.getExitString()));
+                try {
+                    // ChatService가 DB 참여 기록을 먼저 삭제한다.
+                    // 마지막 참여자라면 빈 방도 삭제한다.
+                    User exitUser = chatService.exitChatRoom(
+                            roomName, loggedInUser.getId());
 
-                    sendMessage(new UserListResponse(
-                            roomName,
-                            new java.util.ArrayList<>(room.getUsers())));
+                    // 요청자에게 DB 처리가 성공했음을 알린다.
+                    writeResponse(
+                            socket, "EXIT_CHAT_RESULT:SUCCESS," + roomName);
+
+                    if (room.ieExistUser()) {
+                        // 방에 남은 접속자에게 퇴장과 사용자 목록을 알린다.
+                        sendMessage(new MessageResponse(
+                                MessageType.EXIT,
+                                roomName,
+                                exitUser.getName(),
+                                exitUser.getExitString()));
+
+                        sendMessage(new UserListResponse(
+                                roomName,
+                                new java.util.ArrayList<>(room.getUsers())));
+                    }
+
+                    // 각 사용자의 DB 참여 관계에 맞는 방 목록을 다시 보낸다.
+                    sendMessage(new ChatRoomListResponse(
+                            chatService.getChatRooms()));
+
+                } catch (UserNotFoundException
+                        | ChatRoomNotFoundException
+                        | IllegalStateException exception) {
+                    System.err.println(
+                            "채팅방 나가기 실패: "
+                            + exception.getClass().getSimpleName());
+                 // 여러 방을 동시에 열었을 때 어느 방의 실패인지 구별한다.
+                    writeResponse(
+                            socket,
+                            "EXIT_CHAT_RESULT:ERROR," + request.getChatRoomName());
                 }
 
-                // 각 사용자에게 자신이 볼 수 있는 방 목록을 다시 보낸다.
-                sendMessage(new ChatRoomListResponse(chatService.getChatRooms()));
                 break;
             }
         }
@@ -646,12 +722,13 @@ public class ServerThread extends Thread {
         List<ChatRoom> visible = new java.util.ArrayList<>();
 
         for (ChatRoom room : chatService.getChatRooms()) {
-            // 그룹 방은 모두에게, 1:1 방은 참여자에게만 보여준다.
-            if (room.getType() == RoomType.GROUP
-                    || room.getUsers().contains(viewer)) {
+            // 그룹/1:1 모두 저장된 참여자에게만 표시한다.
+            // 방에서 나가면 참여자 ID가 삭제되므로 재접속해도 보이지 않는다.
+            if (room.hasMember(viewer.getMemberId())) {
                 visible.add(room);
             }
         }
+
         return visible;
     }
 

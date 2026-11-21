@@ -45,8 +45,8 @@ public class ChatPanel extends JPanel implements ActionListener {
     private final JButton drawingBtn = new JButton("그림판");
     private final JButton whisperBtn = new JButton("귓속말");
 
-	 // 서버가 보내준 현재 방 참여자 목록이다.
-	 private List<User> roomUsers = new ArrayList<>();
+	// 서버가 보내준 현재 방 참여자 목록이다.
+	private List<User> roomUsers = new ArrayList<>();
 
     public ChatPanel(JFrame frame, String chatRoomName) {
         this.frame = frame;
@@ -287,5 +287,9 @@ public class ChatPanel extends JPanel implements ActionListener {
         chatPane.setCaretPosition(document.getLength());
         chatPane.insertIcon(new ImageIcon(preview));
         appendText("\n");
+    }
+    
+    public JFrame getFrame() {
+        return frame;
     }
 }

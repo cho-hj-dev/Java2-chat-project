@@ -67,11 +67,14 @@ public class ChatRoomListPanel extends JPanel {
 
         @Override
         public void mouseClicked(MouseEvent e) {
-            if (Application.chatPanelMap.containsKey(chatRoomName)) {
-                JOptionPane.showMessageDialog(null,
-                        "chat room is already opened.", "Message", JOptionPane.ERROR_MESSAGE);
-                return;
-            }
+        	ChatPanel openedPanel = Application.chatPanelMap.get(chatRoomName);
+        	if (openedPanel != null) {
+        	    // X로 숨긴 창은 방을 다시 만들지 않고 화면에 재표시한다.
+        	    JFrame openedFrame = openedPanel.getFrame();
+        	    openedFrame.setVisible(true);
+        	    openedFrame.toFront();
+        	    return;
+        	}
 
             ChatFrame chatFrame = new ChatFrame(chatRoomName);
             Application.chatPanelMap.put(chatRoomName, chatFrame.getChatPanel()); // 채팅방 화면 관리
