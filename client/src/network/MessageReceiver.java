@@ -82,6 +82,19 @@ public class MessageReceiver extends Thread {
     	        && type != DtoType.ACCOUNT_RECOVERY_RESULT) return;
 
         switch (type) {
+	        case EXIT_CHAT_RESULT: {
+	            // 서버 형식: SUCCESS,방이름 또는 ERROR,방이름
+	            String[] values = message.split(",", 2);
+	            if (values.length != 2) {
+	                break;
+	            }
+	
+	            ChatPanel panel = Application.chatPanelMap.get(values[1]);
+	            if (panel != null && panel.getFrame() instanceof ChatFrame chatFrame) {
+	                chatFrame.showExitResult("SUCCESS".equals(values[0]));
+	            }
+	            break;
+	        }
 	        case SCHEDULE_RESULT: {
 	            // 이 메서드는 이미 Swing 이벤트 스레드에서 호출된다.
 	            if (Application.calendarFrame != null
@@ -239,7 +252,8 @@ public class MessageReceiver extends Thread {
                     break;
                 }
 
-                ChatFrame chatFrame = new ChatFrame(roomName);
+                ChatFrame chatFrame = new ChatFrame(
+                        roomName, domain.RoomType.GROUP);
                 Application.chatPanelMap.put(
                         roomName, chatFrame.getChatPanel());
                 Application.chatRoomUserListPanelMap.put(

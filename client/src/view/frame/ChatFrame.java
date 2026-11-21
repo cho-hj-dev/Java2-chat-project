@@ -41,6 +41,8 @@ public class ChatFrame extends JFrame implements WindowListener {
         menuPanel.setInviteBtnVisible(roomType == RoomType.GROUP);
 
         addWindowListener(this);
+        // X를 누르면 탈퇴하지 않고 창만 숨긴다.
+        setDefaultCloseOperation(JFrame.HIDE_ON_CLOSE);
         setVisible(true);
     }
 
@@ -94,5 +96,23 @@ public class ChatFrame extends JFrame implements WindowListener {
     @Override
     public void windowDeactivated(WindowEvent e) {
 
+    }
+    
+    public void showExitResult(boolean success) {
+        menuPanel.exitRequestFinished();
+
+        if (success) {
+            // DB에서 방 탈퇴가 완료된 뒤에만 화면 관리를 해제한다.
+            Application.chatPanelMap.remove(chatRoomName);
+            Application.chatRoomUserListPanelMap.remove(chatRoomName);
+            dispose();
+            return;
+        }
+
+        // 실패했다면 방과 참여 상태를 유지하고 다시 시도할 수 있게 한다.
+        setVisible(true);
+        toFront();
+        JOptionPane.showMessageDialog(
+                this, "채팅방을 나가지 못했습니다. 다시 시도해 주세요.");
     }
 }

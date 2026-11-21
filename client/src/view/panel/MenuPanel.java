@@ -33,6 +33,7 @@ public class MenuPanel extends JPanel {
     private ProfileFrame profileFrame;
     private final JButton toolsBtn = new JButton("도구");
     private final JPopupMenu toolsMenu = new JPopupMenu();
+    private boolean exitPending = false;
 
     public MenuPanel(JFrame frame, String chatRoomName) {
         setLayout(null);
@@ -65,7 +66,7 @@ public class MenuPanel extends JPanel {
         });
         toolsMenu.add(calendarItem);
         
-     // 로비의 도구 메뉴에서 독립적인 틱택토 창을 연다.
+        // 로비의 도구 메뉴에서 독립적인 틱택토 창을 연다.
         JMenuItem gameItem = new JMenuItem("틱택토");
         gameItem.addActionListener(event -> new TicTacToeFrame());
         toolsMenu.add(gameItem);
@@ -82,18 +83,33 @@ public class MenuPanel extends JPanel {
         createChatBtn.setVisible(false); // 로비 채팅방, 생성된 채팅방에 따라 버튼 show, hide
 
         exitBtn.setBounds(205, 10, 180, 35);
-        exitBtn.addActionListener(new ActionListener() {
-            @Override
-            public void actionPerformed(ActionEvent e) {
-                System.out.println("chat room exit btn clicked");
-                System.out.println("chat room = [" + chatRoomName + "] chat frame closed.");
+        exitBtn.addActionListener(event -> {
+            if (exitPending) {
+                return;
+            }
 
-                // 채팅창이 닫히면 사용자 나가기 처리
-                Application.chatPanelMap.remove(chatRoomName);
-                Application.chatRoomUserListPanelMap.remove(chatRoomName);
-                Application.sender.sendMessage(new ExitChatRequest(chatRoomName, Application.me.getId()));
+            int answer = JOptionPane.showConfirmDialog(
+                    frame,
+                    "채팅방을 정말로 나가시겠습니까?",
+                    "채팅방 나가기",
+                    JOptionPane.YES_NO_OPTION,
+                    JOptionPane.QUESTION_MESSAGE);
 
-                frame.dispose(); // 채팅 화면 닫기
+            if (answer != JOptionPane.YES_OPTION) {
+                return;
+            }
+
+            // 서버의 성공 응답이 올 때까지 중복 요청을 막는다.
+            exitPending = true;
+            exitBtn.setEnabled(false);
+
+            boolean sent = Application.sender.sendMessage(
+                    new ExitChatRequest(chatRoomName, Application.me.getId()));
+
+            if (!sent) {
+                exitRequestFinished();
+                JOptionPane.showMessageDialog(
+                        frame, "나가기 요청을 보내지 못했습니다.");
             }
         });
         add(exitBtn);
@@ -217,5 +233,10 @@ public class MenuPanel extends JPanel {
                 return;
             }
         }
+    }
+    
+    public void exitRequestFinished() {
+        exitPending = false;
+        exitBtn.setEnabled(true);
     }
 }
