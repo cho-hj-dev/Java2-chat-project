@@ -1,6 +1,10 @@
 package dto.type;
 
 public enum DtoType {
+	CHAT_HISTORY_BEGIN,
+	CHAT_HISTORY_ITEM,
+	CHAT_HISTORY_END,
+	
 	SCHEDULE,         // 클라이언트 → 서버: 일정 CRUD 요청
 	SCHEDULE_RESULT,  // 서버 → 클라이언트: 일정 처리 결과
 	
