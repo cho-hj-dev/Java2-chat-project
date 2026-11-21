@@ -41,6 +41,7 @@ import service.WeatherService;
 import service.ScheduleService;
 
 import dao.ChatMessageDao;
+import dao.ChatHistoryDao;
 
 public class ServerThread extends Thread {
 
@@ -49,6 +50,7 @@ public class ServerThread extends Thread {
     ChatService chatService;
     private User loggedInUser;
     private final ChatMessageDao chatMessageDao = new ChatMessageDao();
+    private final ChatHistoryDao chatHistoryDao = new ChatHistoryDao();
     
     //(7주차) 모든 접속 스레드가 같은 날씨 결과를 사용해야 10분 캐시가 작동한다.
     private static final WeatherService WEATHER_SERVICE =
@@ -385,29 +387,42 @@ public class ServerThread extends Thread {
 	            break;
 	        }
 	        
-            case LOGIN:
-                User user = authenticateLogin(message);
-                if (user == null) break;
-                sendLoginResult(LoginResultResponse.Status.SUCCESS, user.getId(), user.getName());
+            case LOGIN: {
+                synchronized (chatService) {
+                    User user = authenticateLogin(message);
+                    if (user == null) {
+                        break;
+                    }
 
-                // [to 채팅방에 있는 다른 사용자] 입장 메시지 전송
-                MessageResponse lobbyEnterMessageRes = new MessageResponse(MessageType.ENTER, ChatDao.LOBBY_CHAT_NAME, user.getName(), user.getEnterString());
-                sendMessage(lobbyEnterMessageRes);
+                    sendLoginResult(
+                            LoginResultResponse.Status.SUCCESS,
+                            user.getId(),
+                            user.getName());
 
+                    // 다른 접속자에게 로비 입장을 알린다.
+                    sendMessage(new MessageResponse(
+                            MessageType.ENTER,
+                            ChatDao.LOBBY_CHAT_NAME,
+                            user.getName(),
+                            user.getEnterString()));
 
-                // 그룹 방은 모두 볼 수 있고, 1:1 방은 참여자만 볼 수 있다.
-                List<ChatRoom> chatRooms = visibleRoomsFor(user);
-                List<User> users = chatService.getUsers();
+                    // 로그인한 회원에게 DB 참여 관계에 맞는 방 목록을 보낸다.
+                    List<ChatRoom> chatRooms = visibleRoomsFor(user);
+                    List<User> users = chatService.getUsers();
+                    sendMessage(new InitDataResponse(chatRooms, users));
 
-                InitDataResponse initRes = new InitDataResponse(chatRooms, users);
-                sendMessage(initRes);
+                    sendMessage(new UserListResponse(
+                            ChatDao.LOBBY_CHAT_NAME,
+                            chatService.getUsers()));
 
-                // [to 채팅방에 있는 다른 사용자] 사용자 리스트 전송
-                UserListResponse userListRes = new UserListResponse(ChatDao.LOBBY_CHAT_NAME, chatService.getUsers());
-                sendMessage(userListRes);
+                    // 로그인 직후 로비의 이전 대화를 보낸다.
+                    sendRecentHistory(ChatDao.LOBBY_CHAT_NAME);
+                }
                 break;
+            }
 
-            case MESSAGE:
+            case MESSAGE: {
+                synchronized (chatService) {
                 // 클라이언트가 보낸 채팅 또는 그림 메시지를 해석한다.
                 MessageResponse received = new MessageResponse(message);
                 ChatRoom targetRoom =
@@ -523,6 +538,8 @@ public class ServerThread extends Thread {
                 );
                 sendMessage(outgoing);
                 break;
+                }
+            }
                 
             case CREATE_CHAT: {
                 try {
@@ -613,52 +630,58 @@ public class ServerThread extends Thread {
                 break;
             }
 
-            case ENTER_CHAT:
-                // 서버에 채팅방에 들어온 사용자 설정
-                EnterChatRequest enterChatReq = new EnterChatRequest(message);
-                String enterChatRoomName = enterChatReq.getChatRoomName();
-                String userId = enterChatReq.getUserId();
-                // 요청의 사용자 ID가 현재 로그인한 사용자와 일치해야 한다.
-                if (!loggedInUser.getId().equals(userId)) {
-                    break;
+            case ENTER_CHAT: {
+                synchronized (chatService) {
+                    EnterChatRequest request = new EnterChatRequest(message);
+                    String roomName = request.getChatRoomName();
+
+                    // 현재 소켓에서 로그인한 사용자와 요청 ID가 일치해야 한다.
+                    if (!loggedInUser.getId().equals(request.getUserId())) {
+                        break;
+                    }
+
+                    ChatRoom room = chatService.getChatRoom(roomName);
+                    if (room == null) {
+                        break;
+                    }
+
+                    // 재접속한 1:1 방은 저장된 참여자 ID로 검사한다.
+                    if (room.getType() == RoomType.DIRECT
+                            && !room.hasMember(loggedInUser.getMemberId())) {
+                        break;
+                    }
+
+                    // 그룹방 초대 수락 시 참여 기록도 DB에 추가된다.
+                    chatService.enterChatRoom(roomName, loggedInUser.getId());
+
+                    // 실시간 입장 알림보다 이전 대화를 먼저 전송한다.
+                    sendRecentHistory(roomName);
+
+                    sendMessage(new MessageResponse(
+                            MessageType.ENTER,
+                            roomName,
+                            loggedInUser.getName(),
+                            loggedInUser.getEnterString()));
+
+                    sendMessage(new UserListResponse(
+                            roomName,
+                            chatService.getChatRoomUsers(roomName)));
+
+                    // 새로 참여한 방을 로비 목록에도 반영한다.
+                    writeResponse(
+                            socket,
+                            new ChatRoomListResponse(
+                                    visibleRoomsFor(loggedInUser)));
                 }
-
-                ChatRoom requestedRoom = chatService.getChatRoom(enterChatRoomName);
-                if (requestedRoom == null) {
-                    break;
-                }
-
-	             // 접속 중인 사용자 목록은 서버 재시작 시 비워진다.
-	             // 1:1 방의 입장 자격은 DB에서 복원한 참여자 ID로 확인한다.
-	             if (requestedRoom.getType() == RoomType.DIRECT
-	                     && !requestedRoom.hasMember(loggedInUser.getMemberId())) {
-	                 break;
-	             }
-                chatService.enterChatRoom(enterChatRoomName, userId);
-
-                // [to 채팅방에 있는 다른 사용자] 입장 메시지 전송
-                User enterUser = chatService.getUser(userId);
-                MessageResponse enterChatRoomEnterMessageRes = new MessageResponse(MessageType.ENTER, enterChatRoomName, enterUser.getName(), enterUser.getEnterString());
-                sendMessage(enterChatRoomEnterMessageRes);
-
-                // [to 채팅방에 있는 모든 사용자 (나 자신 포함)] 사용자 리스트 전송
-                UserListResponse enterChatRoomUserListRes = new UserListResponse(enterChatRoomName, chatService.getChatRoomUsers(enterChatRoomName));
-                sendMessage(enterChatRoomUserListRes);
-                
-	             // 그룹방 초대를 수락해 처음 입장한 경우에도
-	             // 새 참여 관계가 로비의 방 목록에 반영되게 한다.
-	             writeResponse(
-	                     loggedInUser.getSocket(),
-	                     new ChatRoomListResponse(visibleRoomsFor(loggedInUser)));
-
                 break;
-                
+            }
+
             case EXIT_CHAT: {
                 ExitChatRequest request = new ExitChatRequest(message);
 
                 // 요청자가 실제 로그인 사용자이고, 이 방의 참여자인지 확인한다.
                 if (!loggedInUser.getId().equals(request.getUserId())) {
-                    writeResponse(socket, "EXIT_CHAT_RESULT:ERROR");
+                    writeResponse(socket, "EXIT_CHAT_RESULT:ERROR," + request.getChatRoomName());
                     break;
                 }
 
@@ -668,7 +691,7 @@ public class ServerThread extends Thread {
                 if (room == null
                         || !room.hasMember(loggedInUser.getMemberId())
                         || !room.getUsers().contains(loggedInUser)) {
-                    writeResponse(socket, "EXIT_CHAT_RESULT:ERROR");
+                    writeResponse(socket, "EXIT_CHAT_RESULT:ERROR," + request.getChatRoomName());
                     break;
                 }
 
@@ -730,6 +753,49 @@ public class ServerThread extends Thread {
         }
 
         return visible;
+    }
+
+    private void sendRecentHistory(String roomName) {
+        // 응답의 방 이름을 Base64로 인코딩해 구분자와 충돌하지 않게 한다.
+        String encodedRoom = java.util.Base64.getEncoder()
+                .encodeToString(roomName.getBytes(
+                        java.nio.charset.StandardCharsets.UTF_8));
+
+        List<ChatHistoryDao.StoredMessage> history = null;
+        try {
+            // DAO가 방 참여 여부와 귓속말 조회 권한을 검사한다.
+            history = chatHistoryDao.findRecent(
+                    roomName, loggedInUser.getMemberId());
+        } catch (SQLException exception) {
+            System.err.println(
+                    "이전 대화 조회 실패: "
+                    + exception.getClass().getSimpleName());
+        }
+
+        // 한 사용자에게 보내는 기록 묶음이 다른 응답과 섞이지 않게 한다.
+        synchronized (socket) {
+            writeResponse(socket, "CHAT_HISTORY_BEGIN:" + encodedRoom);
+
+            if (history != null) {
+                for (ChatHistoryDao.StoredMessage item : history) {
+                    writeResponse(socket, new ChatHistoryItemResponse(
+                            roomName,
+                            item.messageId(),
+                            item.senderLoginId(),
+                            item.senderName(),
+                            item.recipientUserId(),
+                            item.type(),
+                            item.content(),
+                            item.sentAt()));
+                }
+            }
+
+            // 조회 실패와 기록 0건을 구별할 수 있게 상태를 보낸다.
+            writeResponse(
+                    socket,
+                    "CHAT_HISTORY_END:" + encodedRoom + ","
+                            + (history == null ? "ERROR" : "OK"));
+        }
     }
 
     private void writeResponse(Socket target, Object response) {

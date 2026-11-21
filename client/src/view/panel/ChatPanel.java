@@ -3,12 +3,14 @@ package view.panel;
 import app.Application;
 import dto.request.MessageRequest;
 import dto.type.MessageType;
+import dto.response.ChatHistoryItem;
 
 import view.frame.DrawingFrame;
 import domain.User;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
+import java.time.format.DateTimeFormatter;
 
 import java.awt.Image;
 import java.awt.event.ActionEvent;
@@ -30,10 +32,16 @@ import javax.swing.JTextField;
 import javax.swing.JTextPane;
 import javax.swing.text.BadLocationException;
 import javax.swing.text.StyledDocument;
+import javax.swing.text.SimpleAttributeSet;
+import javax.swing.text.StyleConstants;
 
 public class ChatPanel extends JPanel implements ActionListener {
 
     private static final int MAX_PNG_BYTES = 256 * 1024;
+    private static final DateTimeFormatter HISTORY_TIME_FORMAT =
+            DateTimeFormatter.ofPattern("MM-dd HH:mm");
+    private final List<ChatHistoryItem> historyItems = new ArrayList<>();
+    private boolean historyLoaded = false;
 
     private final String chatRoomName;
     private final JFrame frame;
@@ -76,11 +84,22 @@ public class ChatPanel extends JPanel implements ActionListener {
                 new DrawingFrame(frame, this::sendDrawing));
         add(drawingBtn);
 
+        // 이전 대화 수신이 끝나기 전에는 새 메시지를 보내지 않는다.
+        setComposerEnabled(false);
         frame.add(this);
     }
 
     public void addMessage(
             MessageType messageType, String userName, String message) {
+
+        // 기록 전송 전에 도착한 실시간 메시지는 DB 기록에 포함된다.
+        // 화면에 먼저 붙이면 기록을 표시할 때 중복될 수 있어 건너뛴다.
+        if (!historyLoaded
+                && (messageType == MessageType.CHAT
+                    || messageType == MessageType.IMAGE
+                    || messageType == MessageType.WHISPER)) {
+            return;
+        }
 
         switch (messageType) {
 	        case WHISPER:
@@ -123,6 +142,139 @@ public class ChatPanel extends JPanel implements ActionListener {
         }
     }
     
+    public void beginHistory() {
+        historyItems.clear();
+        historyLoaded = false;
+        setComposerEnabled(false);
+    }
+
+    public void addHistoryItem(ChatHistoryItem item) {
+        if (!historyLoaded && historyItems.size() < 30) {
+            historyItems.add(item);
+        }
+    }
+
+    public void finishHistory(boolean success) {
+        if (historyLoaded) {
+            return;
+        }
+
+        if (success) {
+            // 새 실시간 메시지는 기존 문서 뒤에 있을 수 있다.
+            // 기록을 역순으로 앞에 삽입하면 최종 화면은 시간순이 된다.
+            for (int i = historyItems.size() - 1; i >= 0; i--) {
+                prependHistoryItem(historyItems.get(i));
+            }
+        } else {
+            appendText("[이전 대화를 불러오지 못했습니다.]\n");
+        }
+
+        historyItems.clear();
+        historyLoaded = true;
+        setComposerEnabled(true);
+        chatPane.setCaretPosition(chatPane.getDocument().getLength());
+    }
+
+    public void markHistoryReady() {
+        // 새 방은 아직 저장된 대화가 없으므로 즉시 입력을 허용한다.
+        historyLoaded = true;
+        setComposerEnabled(true);
+    }
+
+    private void setComposerEnabled(boolean enabled) {
+        msgTextF.setEnabled(enabled);
+        sendBtn.setEnabled(enabled);
+        whisperBtn.setEnabled(enabled);
+        drawingBtn.setEnabled(enabled);
+    }
+
+    private void prependHistoryItem(ChatHistoryItem item) {
+        String prefix = "["
+                + item.sentAt().format(HISTORY_TIME_FORMAT) + "] ";
+        boolean mine = Application.me != null
+                && Application.me.getId().equals(item.senderLoginId());
+
+        switch (item.messageType()) {
+            case CHAT:
+                prependText(prefix
+                        + (mine ? "내가 보낸 메시지: "
+                                : "[" + item.senderName()
+                                  + "] 님이 보낸 메시지: ")
+                        + item.content() + "\n");
+                break;
+
+            case WHISPER:
+                prependText(prefix
+                        + (mine ? "[내 귓속말] "
+                                : "[귓속말] "
+                                  + item.senderName() + ": ")
+                        + item.content() + "\n");
+                break;
+
+            case IMAGE:
+                prependHistoryImage(
+                        prefix
+                        + (mine ? "내가 보낸 그림:"
+                                : "[" + item.senderName()
+                                  + "] 님이 보낸 그림:"),
+                        item.content());
+                break;
+
+            default:
+                break;
+        }
+    }
+
+    private void prependHistoryImage(
+            String title, String encodedPng) {
+
+        try {
+            byte[] png = Base64.getDecoder().decode(encodedPng);
+            if (png.length > MAX_PNG_BYTES) {
+                throw new IOException("그림 크기 초과");
+            }
+
+            BufferedImage image = ImageIO.read(
+                    new ByteArrayInputStream(png));
+            if (image == null
+                    || image.getWidth() != 600
+                    || image.getHeight() != 350) {
+                throw new IOException("잘못된 그림 형식");
+            }
+
+            Image preview = image.getScaledInstance(
+                    360, 210, Image.SCALE_SMOOTH);
+            SimpleAttributeSet attributes =
+                    new SimpleAttributeSet();
+            StyleConstants.setIcon(
+                    attributes, new ImageIcon(preview));
+
+            StyledDocument document =
+                    chatPane.getStyledDocument();
+            // 앞에서부터 제목, 그림, 줄바꿈 순서로 보이게 삽입한다.
+            document.insertString(0, "\n", null);
+            document.insertString(0, " ", attributes);
+            document.insertString(0, title + "\n", null);
+
+        } catch (IllegalArgumentException
+                | IOException
+                | BadLocationException exception) {
+            prependText(title
+                    + "\n[그림을 표시하지 못했습니다.]\n");
+        }
+    }
+
+    private void prependText(String text) {
+        try {
+            chatPane.getStyledDocument().insertString(
+                    0, text, null);
+        } catch (BadLocationException exception) {
+            throw new IllegalStateException(
+                    "이전 대화를 표시하지 못했습니다.",
+                    exception);
+        }
+    }
+
     public void setRoomUsers(List<User> users) {
         // 화면의 대상 선택에 사용할 목록을 복사해 보관한다.
         roomUsers = new ArrayList<>(users);
@@ -134,6 +286,7 @@ public class ChatPanel extends JPanel implements ActionListener {
     }
 
     private void sendWhisper() {
+        if (!historyLoaded) return;
         String message = msgTextF.getText();
 
         if (message.isBlank() || message.length() > 2000) {
@@ -209,6 +362,7 @@ public class ChatPanel extends JPanel implements ActionListener {
 
     @Override
     public void actionPerformed(ActionEvent event) {
+        if (!historyLoaded) return;
         String message = msgTextF.getText();
 
         if (!message.isEmpty()) {
@@ -230,6 +384,7 @@ public class ChatPanel extends JPanel implements ActionListener {
     }
 
     private void sendDrawing(BufferedImage drawing) {
+        if (!historyLoaded) return;
         try {
             // 그림판에서 받은 그림을 PNG 바이트로 변환한다.
             ByteArrayOutputStream output = new ByteArrayOutputStream();

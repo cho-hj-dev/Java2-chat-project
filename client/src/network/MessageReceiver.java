@@ -82,6 +82,42 @@ public class MessageReceiver extends Thread {
     	        && type != DtoType.ACCOUNT_RECOVERY_RESULT) return;
 
         switch (type) {
+            case CHAT_HISTORY_BEGIN: {
+                String roomName = new String(
+                        Base64.getDecoder().decode(message),
+                        StandardCharsets.UTF_8);
+                ChatPanel panel = Application.chatPanelMap.get(roomName);
+                if (panel != null) {
+                    panel.beginHistory();
+                }
+                break;
+            }
+
+            case CHAT_HISTORY_ITEM: {
+                ChatHistoryItem item = ChatHistoryItem.parse(message);
+                ChatPanel panel =
+                        Application.chatPanelMap.get(item.roomName());
+                if (panel != null) {
+                    panel.addHistoryItem(item);
+                }
+                break;
+            }
+
+            case CHAT_HISTORY_END: {
+                String[] values = message.split(",", 2);
+                if (values.length != 2) {
+                    break;
+                }
+                String roomName = new String(
+                        Base64.getDecoder().decode(values[0]),
+                        StandardCharsets.UTF_8);
+                ChatPanel panel = Application.chatPanelMap.get(roomName);
+                if (panel != null) {
+                    panel.finishHistory("OK".equals(values[1]));
+                }
+                break;
+            }
+
 	        case EXIT_CHAT_RESULT: {
 	            // 서버 형식: SUCCESS,방이름 또는 ERROR,방이름
 	            String[] values = message.split(",", 2);
@@ -273,10 +309,18 @@ public class MessageReceiver extends Thread {
                 break;
             }
 
-            case MESSAGE:
+            case MESSAGE: {
                 MessageResponse messageRes = new MessageResponse(message);
-                Application.chatPanelMap.get(messageRes.getChatRoomName()).addMessage(messageRes.getMessageType(), messageRes.getUserName(), messageRes.getMessage());
+                ChatPanel panel = Application.chatPanelMap.get(
+                        messageRes.getChatRoomName());
+                if (panel != null) {
+                    panel.addMessage(
+                            messageRes.getMessageType(),
+                            messageRes.getUserName(),
+                            messageRes.getMessage());
+                }
                 break;
+            }
 
             case CREATE_CHAT:
                 CreateChatRoomResponse createChatRoomResponse = new CreateChatRoomResponse(message);

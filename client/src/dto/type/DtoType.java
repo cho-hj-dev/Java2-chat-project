@@ -1,6 +1,10 @@
 package dto.type;
 
 public enum DtoType {
+	CHAT_HISTORY_BEGIN,
+	CHAT_HISTORY_ITEM,
+	CHAT_HISTORY_END,
+	
 	SCHEDULE,
 	SCHEDULE_RESULT,
 	

@@ -168,6 +168,7 @@ public class CreateChatFrame extends JFrame {
 
         // 생성자는 방 화면을 열고, 상대는 로비 목록에서 방을 연다.
         ChatFrame chatFrame = new ChatFrame(chatRoomName, roomType);
+        chatFrame.getChatPanel().markHistoryReady();
         Application.chatPanelMap.put(
                 chatRoomName, chatFrame.getChatPanel());
         Application.chatRoomUserListPanelMap.put(
