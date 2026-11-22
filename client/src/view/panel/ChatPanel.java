@@ -11,6 +11,9 @@ import view.frame.DrawingFrame;
 
 import view.frame.ChatAppearanceDialog;
 import view.style.ChatAppearance;
+import view.style.EmoticonIcons;
+import javax.swing.JMenuItem;
+import javax.swing.JPopupMenu;
 import java.awt.Color;
 import java.awt.Font;
 
@@ -66,8 +69,12 @@ public class ChatPanel extends JPanel implements ActionListener {
     
     private final JButton appearanceBtn = new JButton("화면 설정");
 
+    private final JButton emoticonBtn = new JButton("이모티콘");
+    
 	// 서버가 보내준 현재 방 참여자 목록이다.
 	private List<User> roomUsers = new ArrayList<>();
+	
+	private boolean connectionClosed = false;
 
     public ChatPanel(JFrame frame, String chatRoomName) {
         this.frame = frame;
@@ -89,6 +96,23 @@ public class ChatPanel extends JPanel implements ActionListener {
         appearanceBtn.addActionListener(
                 event -> new ChatAppearanceDialog(frame));
         add(appearanceBtn);
+        
+        // 화면 상단 가운데에서 여섯 개 이모티콘을 선택한다.
+        JPopupMenu emoticonMenu = new JPopupMenu();
+
+        for (String id : EmoticonIcons.IDS) {
+            JMenuItem item = new JMenuItem(
+                    EmoticonIcons.labelFor(id),
+                    EmoticonIcons.iconFor(id));
+            item.addActionListener(event -> sendEmoticon(id));
+            emoticonMenu.add(item);
+        }
+
+        emoticonBtn.setBounds(140, 0, 120, 30);
+        emoticonBtn.addActionListener(event ->
+                emoticonMenu.show(
+                        emoticonBtn, 0, emoticonBtn.getHeight()));
+        add(emoticonBtn);
         
 
         scrollPane.setBounds(10, 35, 380, 415);
@@ -116,6 +140,42 @@ public class ChatPanel extends JPanel implements ActionListener {
         // 이전 대화 수신이 끝나기 전에는 새 메시지를 보내지 않는다.
         setComposerEnabled(false);
         frame.add(this);
+    }
+    
+    private void sendEmoticon(String id) {
+        if (!historyLoaded || EmoticonIcons.iconFor(id) == null) {
+            return;
+        }
+
+        // 이미지 바이트 대신 정해진 ID만 전송한다.
+        boolean sent = Application.sender.sendMessage(
+                new MessageRequest(
+                        MessageType.EMOTICON,
+                        chatRoomName,
+                        Application.me.getName(),
+                        id));
+
+        if (sent) {
+            appendEmoticon("내가 보낸 이모티콘:", id);
+        } else {
+            JOptionPane.showMessageDialog(
+                    frame, "이모티콘을 전송하지 못했습니다.");
+        }
+    }
+
+    private void appendEmoticon(String title, String id) {
+        ImageIcon icon = EmoticonIcons.iconFor(id);
+
+        if (icon == null) {
+            appendText("[이모티콘을 표시하지 못했습니다.]\n");
+            return;
+        }
+
+        appendText(title + "\n");
+        chatPane.setCaretPosition(
+                chatPane.getStyledDocument().getLength());
+        chatPane.insertIcon(icon);
+        appendText("\n");
     }
     
     public void applyAppearance(ChatAppearance appearance) {
@@ -155,11 +215,17 @@ public class ChatPanel extends JPanel implements ActionListener {
         if (!historyLoaded
                 && (messageType == MessageType.CHAT
                     || messageType == MessageType.IMAGE
-                    || messageType == MessageType.WHISPER)) {
+                    || messageType == MessageType.WHISPER
+                    || messageType == MessageType.EMOTICON)) {
             return;
         }
 
         switch (messageType) {
+	        case EMOTICON:
+	            appendEmoticon(
+	                    "[" + userName + "] 님이 보낸 이모티콘:",
+	                    message);
+	            break;
 	        case WHISPER:
 	            appendText("[귓속말] " + userName + ": " + message + "\n");
 	            break;
@@ -240,11 +306,23 @@ public class ChatPanel extends JPanel implements ActionListener {
     }
 
     private void setComposerEnabled(boolean enabled) {
-        msgTextF.setEnabled(enabled);
-        sendBtn.setEnabled(enabled);
-        whisperBtn.setEnabled(enabled);
-        drawingBtn.setEnabled(enabled);
-        searchBtn.setEnabled(enabled);
+    	boolean available = enabled && !connectionClosed;
+        msgTextF.setEnabled(available);
+        sendBtn.setEnabled(available);
+        whisperBtn.setEnabled(available);
+        drawingBtn.setEnabled(available);
+        searchBtn.setEnabled(available);
+        emoticonBtn.setEnabled(available);
+    }
+    
+    public void connectionClosed() {
+        if (connectionClosed) {
+            return;
+        }
+
+        connectionClosed = true;
+        setComposerEnabled(false);
+        appendText("[서버 연결이 종료되었습니다. 프로그램을 다시 실행해 주세요.]\n");
     }
 
     private void prependHistoryItem(ChatHistoryItem item) {
@@ -254,6 +332,14 @@ public class ChatPanel extends JPanel implements ActionListener {
                 && Application.me.getId().equals(item.senderLoginId());
 
         switch (item.messageType()) {
+	        case EMOTICON:
+	            prependHistoryEmoticon(
+	                    prefix
+	                            + (mine ? "내가 보낸 이모티콘:"
+	                                    : "[" + item.senderName()
+	                                      + "] 님이 보낸 이모티콘:"),
+	                    item.content());
+	            break;
             case CHAT:
                 prependText(prefix
                         + (mine ? "내가 보낸 메시지: "
@@ -281,6 +367,31 @@ public class ChatPanel extends JPanel implements ActionListener {
 
             default:
                 break;
+        }
+    }
+    
+    private void prependHistoryEmoticon(String title, String id) {
+        ImageIcon icon = EmoticonIcons.iconFor(id);
+
+        if (icon == null) {
+            prependText(title
+                    + "\n[이모티콘을 표시하지 못했습니다.]\n");
+            return;
+        }
+
+        StyledDocument document = chatPane.getStyledDocument();
+        SimpleAttributeSet attributes = new SimpleAttributeSet();
+        StyleConstants.setIcon(attributes, icon);
+
+        try {
+            // 이전 기록은 문서 앞에 넣으므로 역순으로 삽입한다.
+            document.insertString(0, "\n", null);
+            document.insertString(0, " ", attributes);
+            document.insertString(0, title + "\n", null);
+        } catch (BadLocationException exception) {
+            throw new IllegalStateException(
+                    "이모티콘 기록을 표시하지 못했습니다.",
+                    exception);
         }
     }
 

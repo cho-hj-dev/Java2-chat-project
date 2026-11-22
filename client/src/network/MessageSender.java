@@ -16,6 +16,10 @@ public class MessageSender {
 
     public synchronized boolean sendMessage(DTO dto) {
         DtoType type = dto.getType();
+        // 종료된 연결에는 전송을 시도하지 않는다.
+        if (socket.isClosed() || !socket.isConnected()) {
+            return false;
+        }
 
         try {
             PrintWriter writer = new PrintWriter(socket.getOutputStream(), true);
@@ -76,7 +80,9 @@ public class MessageSender {
             return !writer.checkError();
         }
         catch (Exception e) {
-            e.printStackTrace();
+            // 연결 종료 시 긴 스택 트레이스 대신 오류 종류만 기록한다.
+            System.err.println("메시지 전송 실패: "
+                    + e.getClass().getSimpleName());
             return false;
         }
 

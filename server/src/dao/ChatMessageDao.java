@@ -17,18 +17,18 @@ public class ChatMessageDao {
             MessageType type,
             String content) throws SQLException {
 
-        // 입장·퇴장 알림은 대화 메시지가 아니므로 저장 대상에서 제외한다.
-        if (type != MessageType.CHAT
-                && type != MessageType.IMAGE
-                && type != MessageType.WHISPER) {
-            throw new IllegalArgumentException(
-                    "저장할 수 없는 메시지 종류입니다.");
-        }
-
         if (type == MessageType.WHISPER
                 && recipientUserId == null) {
             throw new IllegalArgumentException(
                     "귓속말 수신자가 없습니다.");
+        }
+        
+        if (type != MessageType.CHAT
+                && type != MessageType.IMAGE
+                && type != MessageType.WHISPER
+                && type != MessageType.EMOTICON) {
+            throw new IllegalArgumentException(
+                    "저장할 수 없는 메시지 종류입니다.");
         }
 
         // 방 이름을 DB의 room_id로 변환해 저장한다.
