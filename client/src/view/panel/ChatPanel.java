@@ -8,6 +8,12 @@ import dto.response.ChatSearchItem;
 import view.frame.ChatSearchDialog;
 
 import view.frame.DrawingFrame;
+
+import view.frame.ChatAppearanceDialog;
+import view.style.ChatAppearance;
+import java.awt.Color;
+import java.awt.Font;
+
 import domain.User;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
@@ -57,6 +63,8 @@ public class ChatPanel extends JPanel implements ActionListener {
     
     private final JButton searchBtn = new JButton("대화 검색");
     private ChatSearchDialog searchDialog;
+    
+    private final JButton appearanceBtn = new JButton("화면 설정");
 
 	// 서버가 보내준 현재 방 참여자 목록이다.
 	private List<User> roomUsers = new ArrayList<>();
@@ -75,9 +83,19 @@ public class ChatPanel extends JPanel implements ActionListener {
         searchBtn.setBounds(270, 0, 120, 30);
         searchBtn.addActionListener(event -> openSearchDialog());
         add(searchBtn);
+        
+        // 로비와 일반 채팅방에서 같은 화면 설정 창을 연다.
+        appearanceBtn.setBounds(10, 0, 120, 30);
+        appearanceBtn.addActionListener(
+                event -> new ChatAppearanceDialog(frame));
+        add(appearanceBtn);
+        
 
         scrollPane.setBounds(10, 35, 380, 415);
         add(scrollPane);
+        
+        // 새로 연 채팅방은 저장된 설정을 처음부터 적용한다.
+        applyAppearance(ChatAppearance.load());
 
         msgTextF.setBounds(10, 460, 150, 35);
         add(msgTextF);
@@ -98,6 +116,35 @@ public class ChatPanel extends JPanel implements ActionListener {
         // 이전 대화 수신이 끝나기 전에는 새 메시지를 보내지 않는다.
         setComposerEnabled(false);
         frame.add(this);
+    }
+    
+    public void applyAppearance(ChatAppearance appearance) {
+        Color background = appearance.backgroundColor();
+        Font font = appearance.toFont();
+
+        // 어두운 배경에서는 흰색 글씨를 사용해 읽기 쉽게 한다.
+        int brightness = (background.getRed() * 299
+                + background.getGreen() * 587
+                + background.getBlue() * 114) / 1000;
+        Color textColor = brightness < 128
+                ? Color.WHITE
+                : Color.BLACK;
+
+        chatPane.setBackground(background);
+        chatPane.setForeground(textColor);
+        chatPane.setFont(font);
+
+        // 이미 표시된 이전 대화와 실시간 메시지에도 글꼴을 적용한다.
+        // 기존 그림 아이콘 속성은 유지하도록 replace=false를 사용한다.
+        StyledDocument document = chatPane.getStyledDocument();
+        SimpleAttributeSet attributes = new SimpleAttributeSet();
+        StyleConstants.setFontFamily(attributes, font.getFamily());
+        StyleConstants.setFontSize(attributes, font.getSize());
+        StyleConstants.setForeground(attributes, textColor);
+        document.setCharacterAttributes(
+                0, document.getLength(), attributes, false);
+
+        chatPane.repaint();
     }
 
     public void addMessage(
