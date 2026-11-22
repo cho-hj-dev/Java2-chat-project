@@ -21,6 +21,10 @@ public class MessageSender {
             PrintWriter writer = new PrintWriter(socket.getOutputStream(), true);
 
             switch (type) {
+	            case CHAT_SEARCH:
+	                writer.println((ChatSearchRequest) dto);
+	                break;
+            
 	            case INVITE_CHAT:
 	                writer.println((InviteChatRequest) dto);
 	                break;

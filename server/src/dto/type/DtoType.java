@@ -1,6 +1,10 @@
 package dto.type;
 
 public enum DtoType {
+	CHAT_SEARCH,       // 클라이언트 → 서버: 채팅 기록 검색
+	CHAT_SEARCH_ITEM,  // 서버 → 클라이언트: 검색 결과 한 건
+	CHAT_SEARCH_END,   // 서버 → 클라이언트: 검색 완료 또는 실패
+	
 	CHAT_HISTORY_BEGIN,
 	CHAT_HISTORY_ITEM,
 	CHAT_HISTORY_END,
