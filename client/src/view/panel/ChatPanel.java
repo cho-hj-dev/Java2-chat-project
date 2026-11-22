@@ -4,6 +4,8 @@ import app.Application;
 import dto.request.MessageRequest;
 import dto.type.MessageType;
 import dto.response.ChatHistoryItem;
+import dto.response.ChatSearchItem;
+import view.frame.ChatSearchDialog;
 
 import view.frame.DrawingFrame;
 import domain.User;
@@ -52,6 +54,9 @@ public class ChatPanel extends JPanel implements ActionListener {
     private final JButton sendBtn = new JButton("전송");
     private final JButton drawingBtn = new JButton("그림판");
     private final JButton whisperBtn = new JButton("귓속말");
+    
+    private final JButton searchBtn = new JButton("대화 검색");
+    private ChatSearchDialog searchDialog;
 
 	// 서버가 보내준 현재 방 참여자 목록이다.
 	private List<User> roomUsers = new ArrayList<>();
@@ -65,7 +70,13 @@ public class ChatPanel extends JPanel implements ActionListener {
 
         chatPane.setEditable(false);
         JScrollPane scrollPane = new JScrollPane(chatPane);
-        scrollPane.setBounds(10, 0, 380, 450);
+        
+        // 채팅 영역 위쪽에 검색 버튼을 둔다.
+        searchBtn.setBounds(270, 0, 120, 30);
+        searchBtn.addActionListener(event -> openSearchDialog());
+        add(searchBtn);
+
+        scrollPane.setBounds(10, 35, 380, 415);
         add(scrollPane);
 
         msgTextF.setBounds(10, 460, 150, 35);
@@ -186,6 +197,7 @@ public class ChatPanel extends JPanel implements ActionListener {
         sendBtn.setEnabled(enabled);
         whisperBtn.setEnabled(enabled);
         drawingBtn.setEnabled(enabled);
+        searchBtn.setEnabled(enabled);
     }
 
     private void prependHistoryItem(ChatHistoryItem item) {
@@ -446,5 +458,27 @@ public class ChatPanel extends JPanel implements ActionListener {
     
     public JFrame getFrame() {
         return frame;
+    }
+    
+    private void openSearchDialog() {
+        // 같은 방의 검색 창은 하나만 열고 재사용한다.
+        if (searchDialog == null || !searchDialog.isDisplayable()) {
+            searchDialog = new ChatSearchDialog(frame, chatRoomName);
+        } else {
+            searchDialog.setVisible(true);
+            searchDialog.toFront();
+        }
+    }
+
+    public void addSearchResult(ChatSearchItem item) {
+        if (searchDialog != null && searchDialog.isDisplayable()) {
+            searchDialog.addResult(item);
+        }
+    }
+
+    public void finishSearch(boolean success, int resultCount) {
+        if (searchDialog != null && searchDialog.isDisplayable()) {
+            searchDialog.finishSearch(success, resultCount);
+        }
     }
 }

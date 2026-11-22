@@ -42,6 +42,7 @@ import service.ScheduleService;
 
 import dao.ChatMessageDao;
 import dao.ChatHistoryDao;
+import dao.ChatSearchDao;
 
 public class ServerThread extends Thread {
 
@@ -51,6 +52,7 @@ public class ServerThread extends Thread {
     private User loggedInUser;
     private final ChatMessageDao chatMessageDao = new ChatMessageDao();
     private final ChatHistoryDao chatHistoryDao = new ChatHistoryDao();
+    private final ChatSearchDao chatSearchDao = new ChatSearchDao();
     
     //(7주차) 모든 접속 스레드가 같은 날씨 결과를 사용해야 10분 캐시가 작동한다.
     private static final WeatherService WEATHER_SERVICE =
@@ -288,6 +290,11 @@ public class ServerThread extends Thread {
     private void processReceiveMessage(DtoType type, String message)
             throws UserNotFoundException, ChatRoomNotFoundException, ChatRoomExistException, IOException {
         switch (type) {
+        
+	        case CHAT_SEARCH: {
+	            handleChatSearch(message);
+	            break;
+	        }
 	        case SCHEDULE: {
 	            // 사용자 ID는 요청 본문이 아니라 로그인한 소켓에서 가져온다.
 	            String result = new ScheduleService().handle(
@@ -755,6 +762,69 @@ public class ServerThread extends Thread {
         return visible;
     }
 
+    private void handleChatSearch(String message) {
+        String roomName = "";
+
+        try {
+            // 방 이름과 검색어를 해석한다.
+            // 요청에는 사용자 ID를 넣지 않는다.
+            ChatSearchRequest request = new ChatSearchRequest(message);
+            roomName = request.getRoomName();
+
+            // 현재 로그인한 사용자가 접근할 수 있는 방인지 확인한다.
+            // 로비는 로그인한 사용자에게 열려 있고,
+            // 일반 채팅방은 DB에 기록된 참여자만 검색할 수 있다.
+            boolean allowed;
+            synchronized (chatService) {
+                ChatRoom room = chatService.getChatRoom(roomName);
+                allowed = room != null
+                        && (ChatDao.LOBBY_CHAT_NAME.equals(roomName)
+                                || room.hasMember(loggedInUser.getMemberId()));
+            }
+
+            if (!allowed) {
+                writeResponse(socket,
+                        new ChatSearchEndResponse(roomName, false, 0));
+                return;
+            }
+
+            // 로그인한 소켓의 사용자 ID를 DAO에 전달한다.
+            // DAO에서도 방 참여 여부와 귓속말 열람 권한을 다시 검사한다.
+            List<ChatSearchDao.SearchResult> results =
+                    chatSearchDao.search(
+                            roomName,
+                            loggedInUser.getMemberId(),
+                            request.getKeyword());
+
+            // 결과 여러 건과 완료 응답을 한 묶음으로 전송한다.
+            synchronized (socket) {
+                for (ChatSearchDao.SearchResult result : results) {
+                    writeResponse(socket, new ChatSearchItemResponse(
+                            roomName,
+                            result.messageId(),
+                            result.senderLoginId(),
+                            result.senderName(),
+                            result.messageType(),
+                            result.content(),
+                            result.sentAt()));
+                }
+
+                // 결과가 0건이어도 OK와 0을 보내 검색 완료를 알린다.
+                writeResponse(socket,
+                        new ChatSearchEndResponse(
+                                roomName, true, results.size()));
+            }
+
+        } catch (IllegalArgumentException | SQLException exception) {
+            // 검색어와 메시지 내용은 로그에 남기지 않는다.
+            System.err.println("채팅 검색 실패: "
+                    + exception.getClass().getSimpleName());
+
+            writeResponse(socket,
+                    new ChatSearchEndResponse(roomName, false, 0));
+        }
+    }
+    
     private void sendRecentHistory(String roomName) {
         // 응답의 방 이름을 Base64로 인코딩해 구분자와 충돌하지 않게 한다.
         String encodedRoom = java.util.Base64.getEncoder()

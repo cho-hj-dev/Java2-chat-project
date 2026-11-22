@@ -82,6 +82,38 @@ public class MessageReceiver extends Thread {
     	        && type != DtoType.ACCOUNT_RECOVERY_RESULT) return;
 
         switch (type) {
+        
+	        case CHAT_SEARCH_ITEM: {
+	            // 서버가 보낸 결과 한 건을 해당 채팅방의 검색 창에 추가한다.
+	            ChatSearchItem item = ChatSearchItem.parse(message);
+	            ChatPanel panel = Application.chatPanelMap.get(item.roomName());
+	
+	            if (panel != null) {
+	                panel.addSearchResult(item);
+	            }
+	            break;
+	        }
+	
+	        case CHAT_SEARCH_END: {
+	            // 서버 형식: Base64(방 이름),OK 또는 ERROR,결과 수
+	            String[] values = message.split(",", -1);
+	            if (values.length != 3) {
+	                break;
+	            }
+	
+	            String roomName = new String(
+	                    Base64.getDecoder().decode(values[0]),
+	                    StandardCharsets.UTF_8);
+	            boolean success = "OK".equals(values[1]);
+	            int resultCount = Integer.parseInt(values[2]);
+	
+	            ChatPanel panel = Application.chatPanelMap.get(roomName);
+	            if (panel != null) {
+	                panel.finishSearch(success, resultCount);
+	            }
+	            break;
+	        }
+	        
             case CHAT_HISTORY_BEGIN: {
                 String roomName = new String(
                         Base64.getDecoder().decode(message),

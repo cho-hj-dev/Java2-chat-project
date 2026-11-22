@@ -1,6 +1,10 @@
 package dto.type;
 
 public enum DtoType {
+	CHAT_SEARCH,
+	CHAT_SEARCH_ITEM,
+	CHAT_SEARCH_END,
+	
 	CHAT_HISTORY_BEGIN,
 	CHAT_HISTORY_ITEM,
 	CHAT_HISTORY_END,
