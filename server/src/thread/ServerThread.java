@@ -22,6 +22,7 @@ import java.io.InputStreamReader;
 import java.io.PrintWriter;
 import java.net.Socket;
 import java.util.List;
+import java.util.Set;
 
 import security.PasswordHasher;
 import storage.ProfileImageStore;
@@ -53,6 +54,10 @@ public class ServerThread extends Thread {
     private final ChatMessageDao chatMessageDao = new ChatMessageDao();
     private final ChatHistoryDao chatHistoryDao = new ChatHistoryDao();
     private final ChatSearchDao chatSearchDao = new ChatSearchDao();
+    
+ // 클라이언트가 임의의 내용 대신 정해진 이모티콘 ID만 보내도록 제한한다.
+    private static final Set<String> VALID_EMOTICON_IDS = Set.of(
+            "SMILE", "LAUGH", "WINK", "SAD", "ANGRY", "HEART");
     
     //(7주차) 모든 접속 스레드가 같은 날씨 결과를 사용해야 10분 캐시가 작동한다.
     private static final WeatherService WEATHER_SERVICE =
@@ -506,6 +511,13 @@ public class ServerThread extends Thread {
 	                 writeResponse(recipient.getSocket(), whisper);
 	                 break;
 	             }
+	             
+	             // 이모티콘은 그림 데이터가 아닌 짧은 ID만 DB에 저장한다.
+	             if (received.getMessageType() == MessageType.EMOTICON
+	                     && !VALID_EMOTICON_IDS.contains(received.getMessage())) {
+	                 System.err.println("지원하지 않는 이모티콘 ID를 거부했습니다.");
+	                 break;
+	             }
 
                 // 이미지라면 크기와 PNG 형식을 검사한다.
                 if (received.getMessageType() == MessageType.IMAGE
@@ -514,26 +526,27 @@ public class ServerThread extends Thread {
                     break;
                 }
                 
-	             // 일반 채팅과 그림만 이 경로로 저장한다.
-	             // 귓속말은 위 분기에서 이미 처리했다.
+	             // 일반 채팅, 그림, 이모티콘을 DB에 저장한 뒤 방에 전달한다.
+	             // 귓속말은 위 분기에서 별도로 처리했다.
 	             if (received.getMessageType() != MessageType.CHAT
-	                     && received.getMessageType() != MessageType.IMAGE) {
+	                     && received.getMessageType() != MessageType.IMAGE
+	                     && received.getMessageType() != MessageType.EMOTICON) {
 	                 break;
 	             }
-	
+		
 	             try {
-	                 chatMessageDao.save(
-	                         targetRoom.getName(),
-	                         loggedInUser.getMemberId(),
-	                         null,
-	                         received.getMessageType(),
-	                         received.getMessage());
-	             } catch (SQLException exception) {
-	                 System.err.println(
-	                         "메시지 저장 실패: "
-	                         + exception.getClass().getSimpleName());
-	                 break;
-	             }
+	            	    chatMessageDao.save(
+	            	            targetRoom.getName(),
+	            	            loggedInUser.getMemberId(),
+	            	            null,
+	            	            received.getMessageType(),
+	            	            received.getMessage());
+	             } catch (SQLException | IllegalArgumentException exception) {
+	            	    System.err.println(
+	            	            "메시지 저장 실패: "
+	            	            + exception.getClass().getSimpleName());
+	            	    break;
+	            	}
 
                 // 닉네임은 클라이언트가 적어 보낸 값 대신 서버의 로그인 정보로 정한다.
                 // 따라서 다른 사용자의 이름을 임의로 적어 보낼 수 없다.

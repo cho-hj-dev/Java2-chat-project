@@ -71,6 +71,11 @@ public class MessageReceiver extends Thread {
                 if (Application.signupFrame != null) {
                     Application.signupFrame.showSignupResult("ERROR");
                 }
+                
+                // 수신 연결이 끝나면 남아 있는 채팅 화면에서도 전송을 막는다.
+                for (ChatPanel panel : Application.chatPanelMap.values()) {
+                    panel.connectionClosed();
+                }
             });
         }
     }
