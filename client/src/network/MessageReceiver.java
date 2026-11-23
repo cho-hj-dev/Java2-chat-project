@@ -20,6 +20,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.Base64;
 import view.frame.SignupFrame;
 import view.panel.ChatPanel;
+import view.style.EmoticonIcons;
 
 import dto.request.WeatherRequest;
 
@@ -88,6 +89,35 @@ public class MessageReceiver extends Thread {
 
         switch (type) {
         
+	        case EMOTICON_ASSET: {
+	            // 서버 형식: ID,Base64(이름),MIME,Base64(이미지)
+	            String[] values = message.split(",", 4);
+	            if (values.length != 4) {
+	                break;
+	            }
+	
+	            String name = new String(
+	                    Base64.getDecoder().decode(values[1]),
+	                    StandardCharsets.UTF_8);
+	            byte[] imageData = Base64.getDecoder().decode(values[3]);
+	
+	            EmoticonIcons.registerDbAsset(
+	                    values[0], name, values[2], imageData);
+	            break;
+	        }
+	
+	        case EMOTICON_ASSET_END: {
+	            if ("OK".equals(message)) {
+	                // 로비를 포함해 이미 열려 있는 채팅 화면의 메뉴를 갱신한다.
+	                for (ChatPanel panel : Application.chatPanelMap.values()) {
+	                    panel.refreshEmoticonMenu();
+	                }
+	                System.out.println("DB 이모티콘 수신: "
+	                        + EmoticonIcons.dbAssetCount() + "개");
+	            }
+	            break;
+	        }
+	        
 	        case CHAT_SEARCH_ITEM: {
 	            // 서버가 보낸 결과 한 건을 해당 채팅방의 검색 창에 추가한다.
 	            ChatSearchItem item = ChatSearchItem.parse(message);

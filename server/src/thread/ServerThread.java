@@ -44,6 +44,7 @@ import service.ScheduleService;
 import dao.ChatMessageDao;
 import dao.ChatHistoryDao;
 import dao.ChatSearchDao;
+import dao.EmoticonAssetDao;
 
 public class ServerThread extends Thread {
 
@@ -54,6 +55,8 @@ public class ServerThread extends Thread {
     private final ChatMessageDao chatMessageDao = new ChatMessageDao();
     private final ChatHistoryDao chatHistoryDao = new ChatHistoryDao();
     private final ChatSearchDao chatSearchDao = new ChatSearchDao();
+    private final EmoticonAssetDao emoticonAssetDao =
+            new EmoticonAssetDao();
     
  // 클라이언트가 임의의 내용 대신 정해진 이모티콘 ID만 보내도록 제한한다.
     private static final Set<String> VALID_EMOTICON_IDS = Set.of(
@@ -410,6 +413,9 @@ public class ServerThread extends Thread {
                             LoginResultResponse.Status.SUCCESS,
                             user.getId(),
                             user.getName());
+                    
+                    // 클라이언트가 이전 대화를 그리기 전에 DB의 이모티콘 이미지를 보낸다.
+                    sendEmoticonAssets();
 
                     // 다른 접속자에게 로비 입장을 알린다.
                     sendMessage(new MessageResponse(
@@ -878,6 +884,25 @@ public class ServerThread extends Thread {
                     socket,
                     "CHAT_HISTORY_END:" + encodedRoom + ","
                             + (history == null ? "ERROR" : "OK"));
+        }
+    }
+    
+    private void sendEmoticonAssets() {
+        try {
+            // DB에 등록된 각 PNG/GIF 이미지를 로그인한 사용자에게 보낸다.
+            for (EmoticonAssetDao.EmoticonAsset asset
+                    : emoticonAssetDao.findAll()) {
+                writeResponse(socket, new EmoticonAssetResponse(asset));
+            }
+
+            // 이미지가 0개여도 완료 응답을 보내 목록 수신이 끝났음을 알린다.
+            writeResponse(socket, "EMOTICON_ASSET_END:OK");
+
+        } catch (SQLException exception) {
+            // 이미지 조회 실패가 로그인 자체를 종료하지 않도록 분리한다.
+            System.err.println("이모티콘 이미지 조회 실패: "
+                    + exception.getClass().getSimpleName());
+            writeResponse(socket, "EMOTICON_ASSET_END:ERROR");
         }
     }
 
