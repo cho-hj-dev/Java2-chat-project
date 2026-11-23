@@ -75,6 +75,8 @@ public class ChatPanel extends JPanel implements ActionListener {
 	private List<User> roomUsers = new ArrayList<>();
 	
 	private boolean connectionClosed = false;
+	
+	private final JPopupMenu emoticonMenu = new JPopupMenu();
 
     public ChatPanel(JFrame frame, String chatRoomName) {
         this.frame = frame;
@@ -97,16 +99,7 @@ public class ChatPanel extends JPanel implements ActionListener {
                 event -> new ChatAppearanceDialog(frame));
         add(appearanceBtn);
         
-        // 화면 상단 가운데에서 여섯 개 이모티콘을 선택한다.
-        JPopupMenu emoticonMenu = new JPopupMenu();
-
-        for (String id : EmoticonIcons.IDS) {
-            JMenuItem item = new JMenuItem(
-                    EmoticonIcons.labelFor(id),
-                    EmoticonIcons.iconFor(id));
-            item.addActionListener(event -> sendEmoticon(id));
-            emoticonMenu.add(item);
-        }
+        refreshEmoticonMenu();
 
         emoticonBtn.setBounds(140, 0, 120, 30);
         emoticonBtn.addActionListener(event ->
@@ -140,6 +133,19 @@ public class ChatPanel extends JPanel implements ActionListener {
         // 이전 대화 수신이 끝나기 전에는 새 메시지를 보내지 않는다.
         setComposerEnabled(false);
         frame.add(this);
+    }
+    
+    public void refreshEmoticonMenu() {
+        // 서버의 이미지 목록을 모두 받은 뒤 메뉴 아이콘을 다시 만든다.
+        emoticonMenu.removeAll();
+
+        for (String id : EmoticonIcons.availableIds()) {
+            JMenuItem item = new JMenuItem(
+                    EmoticonIcons.labelFor(id),
+                    EmoticonIcons.iconFor(id));
+            item.addActionListener(event -> sendEmoticon(id));
+            emoticonMenu.add(item);
+        }
     }
     
     private void sendEmoticon(String id) {

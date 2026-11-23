@@ -1,6 +1,9 @@
 package dto.type;
 
 public enum DtoType {
+	EMOTICON_ASSET,      // 서버 → 클라이언트: 이모티콘 이미지 한 개
+	EMOTICON_ASSET_END,  // 서버 → 클라이언트: 이미지 목록 전송 완료
+	
 	CHAT_SEARCH,
 	CHAT_SEARCH_ITEM,
 	CHAT_SEARCH_END,

@@ -6,6 +6,7 @@ import java.awt.Graphics2D;
 import java.awt.RenderingHints;
 import java.awt.geom.Path2D;
 import java.awt.image.BufferedImage;
+import java.util.LinkedHashSet;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -13,6 +14,11 @@ import java.util.Map;
 import javax.swing.ImageIcon;
 
 public final class EmoticonIcons {
+	
+	// 로그인 후 서버에서 받은 이미지를 보관한다.
+	// DB 이미지가 없으면 기존 Java2D 아이콘을 계속 사용한다.
+	private static final Map<String, ImageIcon> DB_ICONS = new HashMap<>();
+	private static final Map<String, String> DB_LABELS = new HashMap<>();
 
     // 서버가 허용하는 ID와 반드시 같아야 한다.
     public static final List<String> IDS = List.of(
@@ -24,10 +30,16 @@ public final class EmoticonIcons {
     }
 
     public static ImageIcon iconFor(String id) {
-        return ICONS.get(id);
+        ImageIcon dbIcon = DB_ICONS.get(id);
+        return dbIcon != null ? dbIcon : ICONS.get(id);
     }
 
     public static String labelFor(String id) {
+        String dbLabel = DB_LABELS.get(id);
+        if (dbLabel != null) {
+            return dbLabel;
+        }
+
         return switch (id) {
             case "SMILE" -> "웃음";
             case "LAUGH" -> "크게 웃음";
@@ -37,6 +49,41 @@ public final class EmoticonIcons {
             case "HEART" -> "하트";
             default -> "알 수 없음";
         };
+    }
+
+    public static List<String> availableIds() {
+        // 기존 6개를 먼저 표시하고, 나중에 추가할 GIF ID도 포함한다.
+        LinkedHashSet<String> ids = new LinkedHashSet<>(IDS);
+        ids.addAll(DB_ICONS.keySet());
+        return List.copyOf(ids);
+    }
+
+    public static void registerDbAsset(
+            String id, String name, String mimeType, byte[] imageData) {
+
+        if (!id.matches("[A-Z0-9_]{1,32}")
+                || name.isBlank()
+                || (!"image/png".equals(mimeType)
+                    && !"image/gif".equals(mimeType))
+                || imageData.length == 0
+                || imageData.length > 1_048_576) {
+            throw new IllegalArgumentException("잘못된 이모티콘 이미지 응답입니다.");
+        }
+
+        // ImageIcon은 GIF 바이트를 그대로 받으므로 애니메이션도 유지할 수 있다.
+        ImageIcon icon = new ImageIcon(imageData);
+        if (icon.getIconWidth() <= 0 || icon.getIconHeight() <= 0
+                || icon.getIconWidth() > 256
+                || icon.getIconHeight() > 256) {
+            throw new IllegalArgumentException("이모티콘 이미지 크기가 잘못됐습니다.");
+        }
+
+        DB_ICONS.put(id, icon);
+        DB_LABELS.put(id, name);
+    }
+
+    public static int dbAssetCount() {
+        return DB_ICONS.size();
     }
 
     private static Map<String, ImageIcon> createIcons() {
