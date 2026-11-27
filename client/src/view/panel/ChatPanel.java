@@ -1,5 +1,8 @@
 package view.panel;
 
+import dto.request.GalleryListRequest;
+import javax.swing.JTextArea;
+
 import app.Application;
 import domain.User;
 import dto.request.MessageRequest;
@@ -48,6 +51,7 @@ import javax.swing.text.StyleConstants;
 import javax.swing.text.StyledDocument;
 
 import network.FileDownloadClient;
+import network.ImageGalleryClient;
 
 public class ChatPanel extends JPanel implements ActionListener {
 
@@ -94,6 +98,21 @@ public class ChatPanel extends JPanel implements ActionListener {
     // 서버가 보내준 현재 방 참여자 목록이다.
     private List<User> roomUsers = new ArrayList<>();
     private boolean connectionClosed = false;
+    
+    // 갤러리 목록 요청 중인 방과 수신한 결과를 보관한다.
+    private String galleryRequestedRoom;
+    // 목록의 메시지 ID를 보관해야 선택한 원본을 다시 요청할 수 있다.
+    private record GalleryChoice(
+            long messageId, String imageName, String description) {
+
+        @Override
+        public String toString() {
+            return description;
+        }
+    }
+
+    private final List<GalleryChoice> galleryChoices =
+            new ArrayList<>();
 
     public ChatPanel(JFrame frame, String chatRoomName) {
         this.frame = frame;
@@ -158,7 +177,7 @@ public class ChatPanel extends JPanel implements ActionListener {
             return;
         }
 
-        Object[] options = {"파일 보내기", "받은 파일 저장", "취소"};
+        Object[] options = {"파일 보내기", "받은 파일 저장","이미지 목록 확인" ,"취소"};
 
         int selected = JOptionPane.showOptionDialog(
                 frame,
@@ -181,8 +200,95 @@ public class ChatPanel extends JPanel implements ActionListener {
                         chatRoomName,
                         chooser.getSelectedFile().toPath());
             }
-        } else if (selected == 1) {
-            chooseReceivedFile();
+        }  else if(selected == 1) {
+        	chooseReceivedFile();
+        } else if (selected == 2) {
+            requestGalleryList(chatRoomName);
+        }
+    }
+    
+    private void requestGalleryList(String roomName) {
+        if (!historyLoaded || connectionClosed) {
+            return;
+        }
+        if (galleryRequestedRoom != null) {
+            JOptionPane.showMessageDialog(frame, "이미지 목록을 조회 중입니다.");
+            return;
+        }
+
+        galleryChoices.clear();
+        galleryRequestedRoom = roomName;
+
+        try {
+            boolean sent = Application.sender.sendMessage(
+                    new GalleryListRequest(roomName));
+
+            if (!sent) {
+                galleryRequestedRoom = null;
+                JOptionPane.showMessageDialog(
+                        frame, "이미지 목록 요청을 보내지 못했습니다.");
+            }
+        } catch (IllegalArgumentException exception) {
+            galleryRequestedRoom = null;
+            JOptionPane.showMessageDialog(frame, exception.getMessage());
+        }
+    }
+
+    public void addGalleryItem(
+            String roomName,
+            long messageId,
+            String imageName,
+            String description) {
+
+        if (!roomName.equals(galleryRequestedRoom)) {
+            return;
+        }
+
+        galleryChoices.add(new GalleryChoice(
+                messageId, imageName, description));
+    }
+
+    public void finishGalleryList(
+            String roomName, boolean success, int count) {
+
+        if (!roomName.equals(galleryRequestedRoom)) {
+            return;
+        }
+        galleryRequestedRoom = null;
+
+        if (!success) {
+            JOptionPane.showMessageDialog(
+                    frame, "이미지 목록을 조회할 수 없습니다."
+                            + "\n채팅방 참여 여부를 확인해 주세요.");
+            return;
+        }
+
+        if (count == 0) {
+            JOptionPane.showMessageDialog(
+                    frame, "이 채팅방에 저장된 이미지가 없습니다.");
+            return;
+        }
+
+        GalleryChoice[] choices =
+                galleryChoices.toArray(new GalleryChoice[0]);
+
+        GalleryChoice selected = (GalleryChoice)
+                JOptionPane.showInputDialog(
+                        frame,
+                        "미리 볼 이미지를 선택하세요.",
+                        "이미지 목록: " + roomName
+                                + " (" + count + "건)",
+                        JOptionPane.QUESTION_MESSAGE,
+                        null,
+                        choices,
+                        choices[0]);
+
+        if (selected != null) {
+            ImageGalleryClient.INSTANCE.request(
+                    frame,
+                    roomName,
+                    selected.messageId(),
+                    selected.imageName());
         }
     }
 

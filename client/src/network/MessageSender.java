@@ -29,6 +29,14 @@ public class MessageSender {
 	                // 네 요청 DTO의 toString()이 각각 통신 형식을 만든다.
 	                writer.println(dto);
 	                break;
+	                
+	            case GALLERY_GET:
+	                writer.println((GalleryGetRequest) dto);
+	                break;
+	                
+	            case GALLERY_LIST:
+	                writer.println((GalleryListRequest) dto);
+	                break;
             
 	            case CHAT_SEARCH:
 	                writer.println((ChatSearchRequest) dto);

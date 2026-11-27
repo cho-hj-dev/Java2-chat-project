@@ -1,6 +1,15 @@
 package dto.type;
 
 public enum DtoType {
+    GALLERY_GET,          // 선택한 이미지 원본 요청
+    GALLERY_IMAGE_BEGIN,  // 이미지 형식·크기·해시 수신
+    GALLERY_IMAGE_CHUNK,  // 이미지 조각 수신
+    GALLERY_IMAGE_END,    // 원본 전송 완료
+	
+    GALLERY_LIST,  // 채팅방 이미지 목록 요청
+    GALLERY_ITEM,  // 이미지 정보 한 건
+    GALLERY_END,   // 목록 조회 완료 또는 거부
+	
 	FILE_GET,            // 클라이언트 → 서버: 저장된 파일 요청
 	FILE_DOWNLOAD_BEGIN, // 서버 → 클라이언트: 파일 정보
 	FILE_DOWNLOAD_CHUNK, // 서버 → 클라이언트: 파일 조각

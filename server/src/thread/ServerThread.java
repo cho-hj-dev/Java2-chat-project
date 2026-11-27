@@ -49,6 +49,8 @@ import dao.EmoticonAssetDao;
 import dao.ChatAttachmentDao;
 import service.FileUploadSession;
 
+import dao.ImageGalleryDao;
+
 public class ServerThread extends Thread {
 
     Socket socket; // 담당자 (not 문지기)
@@ -58,6 +60,7 @@ public class ServerThread extends Thread {
     private final ChatMessageDao chatMessageDao = new ChatMessageDao();
     private final ChatHistoryDao chatHistoryDao = new ChatHistoryDao();
     private final ChatSearchDao chatSearchDao = new ChatSearchDao();
+    private final ImageGalleryDao imageGalleryDao = new ImageGalleryDao();
     private final EmoticonAssetDao emoticonAssetDao =
             new EmoticonAssetDao();
     
@@ -322,6 +325,16 @@ public class ServerThread extends Thread {
 	        }
 	        case FILE_END: {
 	            handleFileEnd(message);
+	            break;
+	        }
+	        
+	        case GALLERY_LIST: {
+	            handleGalleryList(message);
+	            break;
+	        }
+	        
+	        case GALLERY_GET: {
+	            handleGalleryGet(message);
 	            break;
 	        }
         
@@ -996,6 +1009,184 @@ public class ServerThread extends Thread {
         }
 
         return visible;
+    }
+    
+    private void handleGalleryGet(String message) {
+        long messageId = 0;
+
+        try {
+            // 요청 형식: Base64(방 이름),메시지 ID
+            String[] values = message.split(",", -1);
+            if (values.length != 2) {
+                throw new IllegalArgumentException("이미지 요청 형식 오류");
+            }
+
+            String roomName = new String(
+                    java.util.Base64.getDecoder().decode(values[0]),
+                    java.nio.charset.StandardCharsets.UTF_8);
+            messageId = Long.parseLong(values[1]);
+
+            if (roomName.isBlank() || roomName.length() > 40
+                    || messageId <= 0) {
+                throw new IllegalArgumentException("이미지 요청 값 오류");
+            }
+
+            // DAO가 이 이미지가 요청한 방에 있는지와
+            // 로그인한 사용자의 방 참여 여부를 모두 확인한다.
+            Optional<ImageGalleryDao.GalleryImageData> found =
+                    imageGalleryDao.findImage(
+                            roomName,
+                            messageId,
+                            loggedInUser.getMemberId());
+
+            if (found.isEmpty()) {
+                writeResponse(socket,
+                        "GALLERY_IMAGE_END:"
+                        + messageId + ",ERROR");
+                return;
+            }
+
+            ImageGalleryDao.GalleryImageData image = found.get();
+            byte[] bytes = image.bytes();
+
+            if (bytes == null || bytes.length == 0
+                    || bytes.length > 10 * 1024 * 1024) {
+                writeResponse(socket,
+                        "GALLERY_IMAGE_END:"
+                        + messageId + ",ERROR");
+                return;
+            }
+
+            // 클라이언트가 수신 후 원본과 같은 데이터인지 검증한다.
+            String hash = java.util.HexFormat.of().formatHex(
+                    java.security.MessageDigest
+                            .getInstance("SHA-256")
+                            .digest(bytes));
+
+            // 전송 도중 다른 응답이 끼어들지 않도록 한 묶음으로 보낸다.
+            synchronized (socket) {
+                writeResponse(socket,
+                        "GALLERY_IMAGE_BEGIN:"
+                        + messageId + ","
+                        + image.mimeType() + ","
+                        + bytes.length + ","
+                        + hash);
+
+                final int chunkBytes = 16 * 1024;
+                int sequence = 0;
+
+                for (int offset = 0;
+                        offset < bytes.length;
+                        offset += chunkBytes) {
+
+                    int end = Math.min(offset + chunkBytes, bytes.length);
+                    byte[] chunk = Arrays.copyOfRange(
+                            bytes, offset, end);
+
+                    String encoded = java.util.Base64.getEncoder()
+                            .encodeToString(chunk);
+
+                    writeResponse(socket,
+                            "GALLERY_IMAGE_CHUNK:"
+                            + messageId + ","
+                            + sequence + ","
+                            + encoded);
+                    sequence++;
+                }
+
+                writeResponse(socket,
+                        "GALLERY_IMAGE_END:"
+                        + messageId + ",OK");
+            }
+
+        } catch (IllegalArgumentException
+                | SQLException
+                | GeneralSecurityException exception) {
+
+            System.err.println("갤러리 이미지 전송 실패: "
+                    + exception.getClass().getSimpleName());
+
+            writeResponse(socket,
+                    "GALLERY_IMAGE_END:"
+                    + messageId + ",ERROR");
+        }
+    }
+    
+    private void handleGalleryList(String message) {
+        String roomName = "";
+
+        try {
+            // 요청 형식: GALLERY_LIST:Base64(채팅방 이름)
+            // 사용자 ID는 요청에서 받지 않고 로그인한 소켓에서 가져온다.
+            roomName = new String(
+                    java.util.Base64.getDecoder().decode(message),
+                    java.nio.charset.StandardCharsets.UTF_8
+            );
+
+            if (roomName.isBlank() || roomName.length() > 40) {
+                throw new IllegalArgumentException("채팅방 이름이 올바르지 않습니다.");
+            }
+
+            // 다른 채팅방의 이름을 알고 있더라도 참여자가 아니면 조회를 거부한다.
+            // DAO에서도 DB의 참여자 정보를 다시 확인한다.
+            boolean allowed;
+            synchronized (chatService) {
+                ChatRoom room = chatService.getChatRoom(roomName);
+                allowed = room != null
+                        && (ChatDao.LOBBY_CHAT_NAME.equals(roomName)
+                            || room.hasMember(loggedInUser.getMemberId()));
+            }
+
+            if (!allowed) {
+                writeResponse(socket,
+                        "GALLERY_END:" + encodeGalleryField(roomName)
+                        + ",ERROR,0");
+                return;
+            }
+
+            List<ImageGalleryDao.GalleryImage> images =
+                    imageGalleryDao.findImages(
+                            roomName, loggedInUser.getMemberId());
+
+            // 목록 응답이 다른 응답 사이에 섞이지 않게 묶어서 보낸다.
+            // 문자열 필드는 쉼표와 줄바꿈에 안전하도록 Base64로 인코딩한다.
+            synchronized (socket) {
+                for (ImageGalleryDao.GalleryImage item : images) {
+                    String attachmentId = item.attachmentId() == null
+                            ? "0"  // 그림판 이미지에는 첨부파일 ID가 없다.
+                            : Long.toString(item.attachmentId());
+
+                    writeResponse(socket,
+                            "GALLERY_ITEM:"
+                            + encodeGalleryField(roomName) + ","
+                            + item.messageId() + ","
+                            + attachmentId + ","
+                            + encodeGalleryField(item.senderName()) + ","
+                            + encodeGalleryField(item.imageSource()) + ","
+                            + encodeGalleryField(item.imageName()) + ","
+                            + encodeGalleryField(item.mimeType()) + ","
+                            + item.sentAt());
+                }
+
+                // 목록이 비어 있어도 OK,0을 보내 조회 완료를 알린다.
+                writeResponse(socket,
+                        "GALLERY_END:" + encodeGalleryField(roomName)
+                        + ",OK," + images.size());
+            }
+
+        } catch (IllegalArgumentException | SQLException exception) {
+            System.err.println("갤러리 목록 조회 실패: "
+                    + exception.getClass().getSimpleName());
+
+            writeResponse(socket,
+                    "GALLERY_END:" + encodeGalleryField(roomName)
+                    + ",ERROR,0");
+        }
+    }
+
+    private static String encodeGalleryField(String value) {
+        return java.util.Base64.getEncoder().encodeToString(
+                value.getBytes(java.nio.charset.StandardCharsets.UTF_8));
     }
 
     private void handleChatSearch(String message) {

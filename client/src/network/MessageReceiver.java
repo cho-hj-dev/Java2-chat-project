@@ -51,6 +51,14 @@ public class MessageReceiver extends Thread {
                     continue;
                 }
                 
+                // 이미지 바이트 조립과 디코딩은 화면 스레드에서 하지 않는다.
+                if (type == DtoType.GALLERY_IMAGE_BEGIN
+                        || type == DtoType.GALLERY_IMAGE_CHUNK
+                        || type == DtoType.GALLERY_IMAGE_END) {
+                    ImageGalleryClient.INSTANCE.onMessage(type, message);
+                    continue;
+                }
+                
                 // Preserve response order and update Swing components on the EDT.
                 SwingUtilities.invokeLater(() -> {
                     try {
@@ -73,6 +81,7 @@ public class MessageReceiver extends Thread {
             }
             
             FileDownloadClient.INSTANCE.connectionClosed();
+            ImageGalleryClient.INSTANCE.connectionClosed();
             
             SwingUtilities.invokeLater(() -> {
                 if (Application.loginFrame != null) {
@@ -100,6 +109,62 @@ public class MessageReceiver extends Thread {
     	        && type != DtoType.ACCOUNT_RECOVERY_RESULT) return;
 
         switch (type) {
+        
+	        case GALLERY_ITEM: {
+	            // 방, 메시지 ID, 첨부 ID, 발신자, 출처, 이름, MIME, 전송 시각
+	            String[] values = message.split(",", -1);
+	            if (values.length != 8) {
+	                break;
+	            }
+	
+	            String roomName = new String(
+	                    Base64.getDecoder().decode(values[0]),
+	                    StandardCharsets.UTF_8);
+	            String senderName = new String(
+	                    Base64.getDecoder().decode(values[3]),
+	                    StandardCharsets.UTF_8);
+	            String source = new String(
+	                    Base64.getDecoder().decode(values[4]),
+	                    StandardCharsets.UTF_8);
+	            String imageName = new String(
+	                    Base64.getDecoder().decode(values[5]),
+	                    StandardCharsets.UTF_8);
+	
+	            String description = "[" + values[7] + "] "
+	                    + source + " | " + imageName
+	                    + " | 보낸 사람: " + senderName
+	                    + " | 메시지 #" + values[1];
+	
+	            // 테스트에서는 요청 방을 임시로 바꿀 수 있으므로
+	            // 현재 열린 모든 패널 중 요청 방이 일치하는 곳에 전달한다.
+	            for (ChatPanel panel : Application.chatPanelMap.values()) {
+	            	panel.addGalleryItem(
+	            	        roomName,
+	            	        Long.parseLong(values[1]),
+	            	        imageName,
+	            	        description);
+	            }
+	            break;
+	        }
+	
+	        case GALLERY_END: {
+	            // Base64(방 이름),OK 또는 ERROR,결과 수
+	            String[] values = message.split(",", -1);
+	            if (values.length != 3) {
+	                break;
+	            }
+	
+	            String roomName = new String(
+	                    Base64.getDecoder().decode(values[0]),
+	                    StandardCharsets.UTF_8);
+	            boolean success = "OK".equals(values[1]);
+	            int count = Integer.parseInt(values[2]);
+	
+	            for (ChatPanel panel : Application.chatPanelMap.values()) {
+	                panel.finishGalleryList(roomName, success, count);
+	            }
+	            break;
+	        }
         
 	        case FILE_NOTICE: {
 	            // ID,Base64(방),Base64(파일명),MIME,크기,Base64(발신자)
