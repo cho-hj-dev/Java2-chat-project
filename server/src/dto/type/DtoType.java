@@ -1,6 +1,19 @@
 package dto.type;
 
 public enum DtoType {
+	FILE_GET,            // 클라이언트 → 서버: 저장된 파일 요청
+	FILE_DOWNLOAD_BEGIN, // 서버 → 클라이언트: 파일 정보
+	FILE_DOWNLOAD_CHUNK, // 서버 → 클라이언트: 파일 조각
+	FILE_DOWNLOAD_END,   // 서버 → 클라이언트: 전송 완료 또는 오류
+	
+	FILE_NOTICE,  // 서버 → 같은 방 사용자: 새 파일이 저장됨
+	
+	FILE_START,   // 클라이언트 → 서버: 파일명·크기·해시 전달
+	FILE_CHUNK,   // 클라이언트 → 서버: 파일 조각 전달
+	FILE_END,     // 클라이언트 → 서버: 업로드 완료
+	FILE_READY,   // 서버 → 클라이언트: 업로드 시작 허용 여부
+	FILE_RESULT,  // 서버 → 클라이언트: DB 저장 결과
+	
 	EMOTICON_ASSET,      // 서버 → 클라이언트: 이모티콘 이미지 한 개
 	EMOTICON_ASSET_END,  // 서버 → 클라이언트: 이미지 목록 전송 완료
 	

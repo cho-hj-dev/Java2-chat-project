@@ -46,6 +46,9 @@ import dao.ChatHistoryDao;
 import dao.ChatSearchDao;
 import dao.EmoticonAssetDao;
 
+import dao.ChatAttachmentDao;
+import service.FileUploadSession;
+
 public class ServerThread extends Thread {
 
     Socket socket; // 담당자 (not 문지기)
@@ -57,6 +60,12 @@ public class ServerThread extends Thread {
     private final ChatSearchDao chatSearchDao = new ChatSearchDao();
     private final EmoticonAssetDao emoticonAssetDao =
             new EmoticonAssetDao();
+    
+    private final ChatAttachmentDao chatAttachmentDao =
+            new ChatAttachmentDao();
+
+    // 접속자 한 명이 현재 보내는 파일 하나만 보관한다.
+    private FileUploadSession pendingUpload;
     
  // 클라이언트가 임의의 내용 대신 정해진 이모티콘 ID만 보내도록 제한한다.
     private static final Set<String> VALID_EMOTICON_IDS = Set.of(
@@ -298,6 +307,23 @@ public class ServerThread extends Thread {
     private void processReceiveMessage(DtoType type, String message)
             throws UserNotFoundException, ChatRoomNotFoundException, ChatRoomExistException, IOException {
         switch (type) {
+	        case FILE_GET: {
+	            handleFileGet(message);
+	            break;
+	        }
+        
+	        case FILE_START: {
+	            handleFileStart(message);
+	            break;
+	        }
+	        case FILE_CHUNK: {
+	            handleFileChunk(message);
+	            break;
+	        }
+	        case FILE_END: {
+	            handleFileEnd(message);
+	            break;
+	        }
         
 	        case CHAT_SEARCH: {
 	            handleChatSearch(message);
@@ -765,6 +791,197 @@ public class ServerThread extends Thread {
                 break;
             }
         }
+    }
+    
+    private void handleFileStart(String message) {
+        if (pendingUpload != null) {
+            writeResponse(socket, "FILE_READY:BUSY");
+            return;
+        }
+
+        try {
+            FileUploadSession session =
+                    FileUploadSession.fromStartMessage(message);
+
+            synchronized (chatService) {
+                ChatRoom room = chatService.getChatRoom(session.roomName());
+
+                // 현재 실제로 입장한 방에만 파일을 보낼 수 있다.
+                if (room == null
+                        || !room.getUsers().contains(loggedInUser)) {
+                    writeResponse(socket, "FILE_READY:DENIED");
+                    return;
+                }
+            }
+
+            pendingUpload = session;
+            writeResponse(socket, "FILE_READY:OK");
+
+        } catch (IllegalArgumentException error) {
+            writeResponse(socket, "FILE_READY:INVALID");
+        }
+    }
+
+    private void handleFileChunk(String message) {
+        if (pendingUpload == null) {
+            writeResponse(socket, "FILE_RESULT:ERROR,NO_UPLOAD");
+            return;
+        }
+
+        try {
+            pendingUpload.appendChunk(message);
+        } catch (IllegalArgumentException error) {
+            // 잘못된 조각 이후에는 불완전한 파일을 계속 사용하지 않는다.
+            pendingUpload = null;
+            writeResponse(socket, "FILE_RESULT:ERROR,INVALID_CHUNK");
+        }
+    }
+
+    private void handleFileEnd(String message) {
+        FileUploadSession session = pendingUpload;
+        pendingUpload = null;
+
+        if (session == null || !message.isEmpty()) {
+            writeResponse(socket, "FILE_RESULT:ERROR,NO_UPLOAD");
+            return;
+        }
+
+        try {
+            byte[] fileData = session.finish();
+
+            synchronized (chatService) {
+                ChatRoom room = chatService.getChatRoom(session.roomName());
+                if (room == null
+                        || !room.getUsers().contains(loggedInUser)) {
+                    writeResponse(socket, "FILE_RESULT:ERROR,DENIED");
+                    return;
+                }
+            }
+
+            // DAO가 파일 메시지와 원본을 한 트랜잭션으로 저장한다.
+            long attachmentId = chatAttachmentDao.save(
+                    session.roomName(),
+                    loggedInUser.getMemberId(),
+                    session.fileName(),
+                    session.mimeType(),
+                    fileData);
+
+            writeResponse(socket, "FILE_RESULT:OK," + attachmentId);
+
+            // 파일 바이트 대신 ID와 표시 정보만 같은 방에 알린다.
+            String notice = "FILE_NOTICE:"
+                    + attachmentId + ","
+                    + encodeFileText(session.roomName()) + ","
+                    + encodeFileText(session.fileName()) + ","
+                    + session.mimeType() + ","
+                    + fileData.length + ","
+                    + encodeFileText(loggedInUser.getName());
+
+            synchronized (chatService) {
+                ChatRoom room = chatService.getChatRoom(session.roomName());
+                if (room != null) {
+                    for (User roomUser :
+                            new java.util.ArrayList<>(room.getUsers())) {
+                        writeResponse(roomUser.getSocket(), notice);
+                    }
+                }
+            }
+
+        } catch (IllegalArgumentException | SQLException error) {
+            System.err.println("파일 저장 실패: "
+                    + error.getClass().getSimpleName());
+            writeResponse(socket, "FILE_RESULT:ERROR,SAVE_FAILED");
+        }
+    }
+    
+    private void handleFileGet(String message) {
+        long attachmentId;
+
+        try {
+            attachmentId = Long.parseLong(message);
+            if (attachmentId <= 0) {
+                throw new NumberFormatException("파일 ID 오류");
+            }
+        } catch (NumberFormatException error) {
+            writeResponse(socket, "FILE_DOWNLOAD_END:0,ERROR,INVALID_ID");
+            return;
+        }
+
+        try {
+            // DAO가 요청자의 채팅방 참여 여부를 DB에서 확인한다.
+            Optional<ChatAttachmentDao.StoredAttachment> found =
+                    chatAttachmentDao.findById(
+                            attachmentId,
+                            loggedInUser.getMemberId());
+
+            if (found.isEmpty()) {
+                writeResponse(
+                        socket,
+                        "FILE_DOWNLOAD_END:"
+                                + attachmentId + ",ERROR,NOT_FOUND");
+                return;
+            }
+
+            ChatAttachmentDao.StoredAttachment file = found.get();
+            byte[] bytes = file.fileData();
+
+            if (bytes == null
+                    || bytes.length != file.fileSizeBytes()
+                    || bytes.length > ChatAttachmentDao.MAX_FILE_BYTES) {
+                writeResponse(
+                        socket,
+                        "FILE_DOWNLOAD_END:"
+                                + attachmentId + ",ERROR,INVALID_DATA");
+                return;
+            }
+
+            // 파일 이름은 한글·쉼표를 포함할 수 있어 Base64로 보낸다.
+            writeResponse(
+                    socket,
+                    "FILE_DOWNLOAD_BEGIN:"
+                            + attachmentId + ","
+                            + encodeFileText(file.fileName()) + ","
+                            + file.mimeType() + ","
+                            + bytes.length + ","
+                            + file.sha256Hex());
+
+            // 업로드 때와 같이 최대 16KB씩 보내 한 줄이 지나치게 길어지지 않게 한다.
+            int sequence = 0;
+            final int chunkBytes = 16 * 1024;
+
+            for (int offset = 0; offset < bytes.length;
+                    offset += chunkBytes) {
+                int end = Math.min(offset + chunkBytes, bytes.length);
+                byte[] chunk = Arrays.copyOfRange(bytes, offset, end);
+                String encoded = java.util.Base64.getEncoder()
+                        .encodeToString(chunk);
+
+                writeResponse(
+                        socket,
+                        "FILE_DOWNLOAD_CHUNK:"
+                                + attachmentId + ","
+                                + sequence + ","
+                                + encoded);
+                sequence++;
+            }
+
+            writeResponse(
+                    socket,
+                    "FILE_DOWNLOAD_END:" + attachmentId + ",OK");
+
+        } catch (SQLException error) {
+            System.err.println("파일 다운로드 조회 실패: "
+                    + error.getClass().getSimpleName());
+            writeResponse(
+                    socket,
+                    "FILE_DOWNLOAD_END:"
+                            + attachmentId + ",ERROR,DB_ERROR");
+        }
+    }
+
+    private String encodeFileText(String value) {
+        return java.util.Base64.getEncoder().encodeToString(
+                value.getBytes(java.nio.charset.StandardCharsets.UTF_8));
     }
     
     private List<ChatRoom> visibleRoomsFor(User viewer) {
