@@ -41,11 +41,21 @@ public class ChatHistoryDao {
                        u.nickname AS sender_name,
                        m.recipient_user_id,
                        m.message_type,
-                       m.content,
+        		  	   CASE
+						    WHEN m.message_type = 'FILE' THEN
+						        COALESCE(
+						            CONCAT(
+						                a.attachment_id, '|',
+						                a.original_name, '|',
+						                a.file_size_bytes),
+						            '')
+						    ELSE m.content
+						END AS content,
                        m.sent_at
                 FROM chat_messages m
                 JOIN chat_rooms r ON r.room_id = m.room_id
                 JOIN users u ON u.user_id = m.sender_user_id
+                LEFT JOIN chat_attachments a ON a.message_id = m.message_id
                 WHERE r.room_name = ?
                   AND (
                       r.room_name = 'Lobby'

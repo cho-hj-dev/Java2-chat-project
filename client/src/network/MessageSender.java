@@ -25,6 +25,11 @@ public class MessageSender {
             PrintWriter writer = new PrintWriter(socket.getOutputStream(), true);
 
             switch (type) {
+	            case FILE_START, FILE_CHUNK, FILE_END, FILE_GET:
+	                // 네 요청 DTO의 toString()이 각각 통신 형식을 만든다.
+	                writer.println(dto);
+	                break;
+            
 	            case CHAT_SEARCH:
 	                writer.println((ChatSearchRequest) dto);
 	                break;

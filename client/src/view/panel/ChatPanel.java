@@ -1,28 +1,20 @@
 package view.panel;
 
 import app.Application;
+import domain.User;
 import dto.request.MessageRequest;
-import dto.type.MessageType;
 import dto.response.ChatHistoryItem;
 import dto.response.ChatSearchItem;
-import view.frame.ChatSearchDialog;
-
-import view.frame.DrawingFrame;
-
+import dto.type.MessageType;
+import network.FileUploadClient;
 import view.frame.ChatAppearanceDialog;
+import view.frame.ChatSearchDialog;
+import view.frame.DrawingFrame;
 import view.style.ChatAppearance;
 import view.style.EmoticonIcons;
-import javax.swing.JMenuItem;
-import javax.swing.JPopupMenu;
+
 import java.awt.Color;
 import java.awt.Font;
-
-import domain.User;
-import java.nio.charset.StandardCharsets;
-import java.util.ArrayList;
-import java.util.List;
-import java.time.format.DateTimeFormatter;
-
 import java.awt.Image;
 import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
@@ -30,53 +22,78 @@ import java.awt.image.BufferedImage;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
 import java.util.Base64;
+import java.util.List;
+import java.util.LinkedHashMap;
+import java.util.Map;
 
 import javax.imageio.ImageIO;
 import javax.swing.ImageIcon;
 import javax.swing.JButton;
+import javax.swing.JFileChooser;
 import javax.swing.JFrame;
+import javax.swing.JMenuItem;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
+import javax.swing.JPopupMenu;
 import javax.swing.JScrollPane;
 import javax.swing.JTextField;
 import javax.swing.JTextPane;
 import javax.swing.text.BadLocationException;
-import javax.swing.text.StyledDocument;
 import javax.swing.text.SimpleAttributeSet;
 import javax.swing.text.StyleConstants;
+import javax.swing.text.StyledDocument;
+
+import network.FileDownloadClient;
 
 public class ChatPanel extends JPanel implements ActionListener {
 
     private static final int MAX_PNG_BYTES = 256 * 1024;
     private static final DateTimeFormatter HISTORY_TIME_FORMAT =
             DateTimeFormatter.ofPattern("MM-dd HH:mm");
+
     private final List<ChatHistoryItem> historyItems = new ArrayList<>();
     private boolean historyLoaded = false;
+    
+    // 현재 방에서 확인한 파일을 ID별로 보관한다.
+    private final Map<Long, ReceivedFile> receivedFiles =
+            new LinkedHashMap<>();
+
+    private record ReceivedFile(
+            long id, String name, int sizeBytes, String senderName) {
+
+        @Override
+        public String toString() {
+            return name + " - " + senderName
+                    + " (" + sizeBytes + "바이트, #" + id + ")";
+        }
+    }
 
     private final String chatRoomName;
     private final JFrame frame;
 
-    // JTextPane은 글과 이미지 아이콘을 한 채팅 영역에 표시할 수 있다.
+    // JTextPane은 텍스트와 그림을 한 채팅 영역에 표시할 수 있다.
     private final JTextPane chatPane = new JTextPane();
     private final JTextField msgTextF = new JTextField(50);
+
     private final JButton sendBtn = new JButton("전송");
     private final JButton drawingBtn = new JButton("그림판");
     private final JButton whisperBtn = new JButton("귓속말");
-    
+
     private final JButton searchBtn = new JButton("대화 검색");
     private ChatSearchDialog searchDialog;
-    
-    private final JButton appearanceBtn = new JButton("화면 설정");
 
+    private final JButton appearanceBtn = new JButton("화면 설정");
     private final JButton emoticonBtn = new JButton("이모티콘");
-    
-	// 서버가 보내준 현재 방 참여자 목록이다.
-	private List<User> roomUsers = new ArrayList<>();
-	
-	private boolean connectionClosed = false;
-	
-	private final JPopupMenu emoticonMenu = new JPopupMenu();
+    private final JButton fileBtn = new JButton("파일");
+    private final JPopupMenu emoticonMenu = new JPopupMenu();
+
+    // 서버가 보내준 현재 방 참여자 목록이다.
+    private List<User> roomUsers = new ArrayList<>();
+    private boolean connectionClosed = false;
 
     public ChatPanel(JFrame frame, String chatRoomName) {
         this.frame = frame;
@@ -87,31 +104,32 @@ public class ChatPanel extends JPanel implements ActionListener {
 
         chatPane.setEditable(false);
         JScrollPane scrollPane = new JScrollPane(chatPane);
-        
-        // 채팅 영역 위쪽에 검색 버튼을 둔다.
-        searchBtn.setBounds(270, 0, 120, 30);
-        searchBtn.addActionListener(event -> openSearchDialog());
-        add(searchBtn);
-        
-        // 로비와 일반 채팅방에서 같은 화면 설정 창을 연다.
-        appearanceBtn.setBounds(10, 0, 120, 30);
+
+        // 상단의 네 버튼이 채팅 영역 너비 380px 안에 들어가도록 배치한다.
+        appearanceBtn.setBounds(10, 0, 90, 30);
         appearanceBtn.addActionListener(
                 event -> new ChatAppearanceDialog(frame));
         add(appearanceBtn);
-        
-        refreshEmoticonMenu();
 
-        emoticonBtn.setBounds(140, 0, 120, 30);
+        refreshEmoticonMenu();
+        emoticonBtn.setBounds(105, 0, 90, 30);
         emoticonBtn.addActionListener(event ->
                 emoticonMenu.show(
                         emoticonBtn, 0, emoticonBtn.getHeight()));
         add(emoticonBtn);
-        
+
+        fileBtn.setBounds(200, 0, 90, 30);
+        fileBtn.addActionListener(event -> chooseFile());
+        add(fileBtn);
+
+        searchBtn.setBounds(295, 0, 95, 30);
+        searchBtn.addActionListener(event -> openSearchDialog());
+        add(searchBtn);
 
         scrollPane.setBounds(10, 35, 380, 415);
         add(scrollPane);
-        
-        // 새로 연 채팅방은 저장된 설정을 처음부터 적용한다.
+
+        // 새로 연 채팅방은 저장된 화면 설정을 처음부터 적용한다.
         applyAppearance(ChatAppearance.load());
 
         msgTextF.setBounds(10, 460, 150, 35);
@@ -134,9 +152,103 @@ public class ChatPanel extends JPanel implements ActionListener {
         setComposerEnabled(false);
         frame.add(this);
     }
+
+    private void chooseFile() {
+        if (!historyLoaded || connectionClosed) {
+            return;
+        }
+
+        Object[] options = {"파일 보내기", "받은 파일 저장", "취소"};
+
+        int selected = JOptionPane.showOptionDialog(
+                frame,
+                "어떤 작업을 할까요?",
+                "파일",
+                JOptionPane.DEFAULT_OPTION,
+                JOptionPane.QUESTION_MESSAGE,
+                null,
+                options,
+                options[0]);
+
+        if (selected == 0) {
+            JFileChooser chooser = new JFileChooser();
+            chooser.setDialogTitle("채팅방에 전송할 파일 선택");
+
+            if (chooser.showOpenDialog(frame)
+                    == JFileChooser.APPROVE_OPTION) {
+                FileUploadClient.INSTANCE.start(
+                        frame,
+                        chatRoomName,
+                        chooser.getSelectedFile().toPath());
+            }
+        } else if (selected == 1) {
+            chooseReceivedFile();
+        }
+    }
+
+    private void chooseReceivedFile() {
+        if (receivedFiles.isEmpty()) {
+            JOptionPane.showMessageDialog(
+                    frame, "이 채팅방에서 확인한 파일이 없습니다.");
+            return;
+        }
+
+        ReceivedFile[] choices =
+                receivedFiles.values().toArray(new ReceivedFile[0]);
+
+        Object selected = JOptionPane.showInputDialog(
+                frame,
+                "저장할 파일을 선택하세요.",
+                "받은 파일",
+                JOptionPane.QUESTION_MESSAGE,
+                null,
+                choices,
+                choices[0]);
+
+        if (selected instanceof ReceivedFile file) {
+            FileDownloadClient.INSTANCE.promptSave(
+                    frame, file.id(), file.name());
+        }
+    }
     
+    public void showFileNotice(
+            long attachmentId,
+            String senderName,
+            String fileName,
+            int fileSizeBytes) {
+    	// 지금 저장하지 않아도 파일 버튼에서 다시 선택할 수 있게 보관한다.
+    	receivedFiles.put(
+    	        attachmentId,
+    	        new ReceivedFile(
+    	                attachmentId, fileName, fileSizeBytes, senderName));
+    	
+
+        // 발신자와 수신자 모두 채팅창에서 파일 전송 사실을 볼 수 있다.
+        appendText("[파일 #" + attachmentId + "] "
+                + senderName + "님이 " + fileName
+                + " (" + fileSizeBytes + "바이트)를 보냈습니다.\n");
+
+        // 자신이 보낸 파일에는 저장 여부를 다시 묻지 않는다.
+        if (Application.me != null
+                && senderName.equals(Application.me.getName())) {
+            return;
+        }
+
+        int answer = JOptionPane.showConfirmDialog(
+                frame,
+                senderName + "님이 보낸 파일을 저장할까요?\n"
+                        + fileName + " (" + fileSizeBytes + "바이트)",
+                "파일 수신",
+                JOptionPane.YES_NO_OPTION);
+
+        if (answer == JOptionPane.YES_OPTION) {
+            FileDownloadClient.INSTANCE.promptSave(
+                    frame, attachmentId, fileName);
+        }
+    }
+
     public void refreshEmoticonMenu() {
-        // 서버의 이미지 목록을 모두 받은 뒤 메뉴 아이콘을 다시 만든다.
+        // 서버의 이미지 목록을 받은 뒤 메뉴 아이콘을 다시 만든다.
         emoticonMenu.removeAll();
 
         for (String id : EmoticonIcons.availableIds()) {
@@ -147,7 +259,7 @@ public class ChatPanel extends JPanel implements ActionListener {
             emoticonMenu.add(item);
         }
     }
-    
+
     private void sendEmoticon(String id) {
         if (!historyLoaded || EmoticonIcons.iconFor(id) == null) {
             return;
@@ -183,7 +295,7 @@ public class ChatPanel extends JPanel implements ActionListener {
         chatPane.insertIcon(icon);
         appendText("\n");
     }
-    
+
     public void applyAppearance(ChatAppearance appearance) {
         Color background = appearance.backgroundColor();
         Font font = appearance.toFont();
@@ -227,14 +339,16 @@ public class ChatPanel extends JPanel implements ActionListener {
         }
 
         switch (messageType) {
-	        case EMOTICON:
-	            appendEmoticon(
-	                    "[" + userName + "] 님이 보낸 이모티콘:",
-	                    message);
-	            break;
-	        case WHISPER:
-	            appendText("[귓속말] " + userName + ": " + message + "\n");
-	            break;
+            case EMOTICON:
+                appendEmoticon(
+                        "[" + userName + "] 님이 보낸 이모티콘:",
+                        message);
+                break;
+
+            case WHISPER:
+                appendText("[귓속말] " + userName + ": " + message + "\n");
+                break;
+
             case ENTER:
             case EXIT:
                 appendText(message + "\n");
@@ -246,7 +360,7 @@ public class ChatPanel extends JPanel implements ActionListener {
                 break;
 
             case IMAGE:
-                // 서버에서 전달받은 PNG를 채팅창에 표시한다.
+                // 서버에서 전달받은 그림판 PNG를 채팅창에 표시한다.
                 try {
                     byte[] png = Base64.getDecoder().decode(message);
                     if (png.length > MAX_PNG_BYTES) {
@@ -271,7 +385,7 @@ public class ChatPanel extends JPanel implements ActionListener {
                 break;
         }
     }
-    
+
     public void beginHistory() {
         historyItems.clear();
         historyLoaded = false;
@@ -312,15 +426,16 @@ public class ChatPanel extends JPanel implements ActionListener {
     }
 
     private void setComposerEnabled(boolean enabled) {
-    	boolean available = enabled && !connectionClosed;
+        boolean available = enabled && !connectionClosed;
         msgTextF.setEnabled(available);
         sendBtn.setEnabled(available);
         whisperBtn.setEnabled(available);
         drawingBtn.setEnabled(available);
         searchBtn.setEnabled(available);
         emoticonBtn.setEnabled(available);
+        fileBtn.setEnabled(available);
     }
-    
+
     public void connectionClosed() {
         if (connectionClosed) {
             return;
@@ -338,14 +453,48 @@ public class ChatPanel extends JPanel implements ActionListener {
                 && Application.me.getId().equals(item.senderLoginId());
 
         switch (item.messageType()) {
-	        case EMOTICON:
-	            prependHistoryEmoticon(
-	                    prefix
-	                            + (mine ? "내가 보낸 이모티콘:"
-	                                    : "[" + item.senderName()
-	                                      + "] 님이 보낸 이모티콘:"),
-	                    item.content());
+	        case FILE: {
+	            // 서버가 파일 기록을 "파일ID|파일명|크기"로 전달한다.
+	            String[] values = item.content().split("\\|", 3);
+	
+	            try {
+	                if (values.length != 3) {
+	                    throw new IllegalArgumentException("파일 기록 형식 오류");
+	                }
+	
+	                long attachmentId = Long.parseLong(values[0]);
+	                String fileName = values[1];
+	                int fileSize = Integer.parseInt(values[2]);
+	
+	                receivedFiles.put(
+	                        attachmentId,
+	                        new ReceivedFile(
+	                                attachmentId,
+	                                fileName,
+	                                fileSize,
+	                                item.senderName()));
+	
+	                prependText(prefix
+	                        + "[파일 #" + attachmentId + "] "
+	                        + item.senderName() + "님이 보낸 파일: "
+	                        + fileName + " (" + fileSize + "바이트)\n");
+	
+	            } catch (IllegalArgumentException error) {
+	                prependText(prefix
+	                        + "[파일 정보를 표시하지 못했습니다.]\n");
+	            }
 	            break;
+	        }
+	        
+            case EMOTICON:
+                prependHistoryEmoticon(
+                        prefix
+                                + (mine ? "내가 보낸 이모티콘:"
+                                        : "[" + item.senderName()
+                                          + "] 님이 보낸 이모티콘:"),
+                        item.content());
+                break;
+
             case CHAT:
                 prependText(prefix
                         + (mine ? "내가 보낸 메시지: "
@@ -375,7 +524,7 @@ public class ChatPanel extends JPanel implements ActionListener {
                 break;
         }
     }
-    
+
     private void prependHistoryEmoticon(String title, String id) {
         ImageIcon icon = EmoticonIcons.iconFor(id);
 
@@ -455,14 +604,17 @@ public class ChatPanel extends JPanel implements ActionListener {
         // 화면의 대상 선택에 사용할 목록을 복사해 보관한다.
         roomUsers = new ArrayList<>(users);
     }
-    
+
     public List<User> getRoomUsers() {
         // 초대 대상 목록에서 현재 방 참여자를 제외할 때 사용한다.
         return new ArrayList<>(roomUsers);
     }
 
     private void sendWhisper() {
-        if (!historyLoaded) return;
+        if (!historyLoaded) {
+            return;
+        }
+
         String message = msgTextF.getText();
 
         if (message.isBlank() || message.length() > 2000) {
@@ -538,7 +690,10 @@ public class ChatPanel extends JPanel implements ActionListener {
 
     @Override
     public void actionPerformed(ActionEvent event) {
-        if (!historyLoaded) return;
+        if (!historyLoaded) {
+            return;
+        }
+
         String message = msgTextF.getText();
 
         if (!message.isEmpty()) {
@@ -560,7 +715,10 @@ public class ChatPanel extends JPanel implements ActionListener {
     }
 
     private void sendDrawing(BufferedImage drawing) {
-        if (!historyLoaded) return;
+        if (!historyLoaded) {
+            return;
+        }
+
         try {
             // 그림판에서 받은 그림을 PNG 바이트로 변환한다.
             ByteArrayOutputStream output = new ByteArrayOutputStream();
@@ -598,6 +756,7 @@ public class ChatPanel extends JPanel implements ActionListener {
 
     private void appendText(String text) {
         StyledDocument document = chatPane.getStyledDocument();
+
         try {
             document.insertString(document.getLength(), text, null);
             chatPane.setCaretPosition(document.getLength());
@@ -610,7 +769,7 @@ public class ChatPanel extends JPanel implements ActionListener {
     private void appendImage(String title, BufferedImage drawing) {
         appendText(title + "\n");
 
-        // 원본 600×350 그림을 채팅창 너비에 맞춰 축소해서 보여준다.
+        // 원본 600×350 그림을 채팅창 너비에 맞춰 축소해 보여준다.
         Image preview = drawing.getScaledInstance(
                 360, 210, Image.SCALE_SMOOTH);
 

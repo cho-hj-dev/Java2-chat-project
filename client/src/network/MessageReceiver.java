@@ -42,6 +42,15 @@ public class MessageReceiver extends Thread {
                 if (token.length != 2) continue;
                 DtoType type = DtoType.valueOf(token[0]);
                 String message = token[1];
+                
+                // 다운로드 바이트는 화면 스레드에서 조립하지 않는다.
+                if (type == DtoType.FILE_DOWNLOAD_BEGIN
+                        || type == DtoType.FILE_DOWNLOAD_CHUNK
+                        || type == DtoType.FILE_DOWNLOAD_END) {
+                    FileDownloadClient.INSTANCE.onMessage(type, message);
+                    continue;
+                }
+                
                 // Preserve response order and update Swing components on the EDT.
                 SwingUtilities.invokeLater(() -> {
                     try {
@@ -62,6 +71,9 @@ public class MessageReceiver extends Thread {
             } catch (IOException e) {
                 System.err.println("Socket close failed.");
             }
+            
+            FileDownloadClient.INSTANCE.connectionClosed();
+            
             SwingUtilities.invokeLater(() -> {
                 if (Application.loginFrame != null) {
                     Application.loginFrame.showLoginResult("ERROR", "", "");
@@ -88,6 +100,43 @@ public class MessageReceiver extends Thread {
     	        && type != DtoType.ACCOUNT_RECOVERY_RESULT) return;
 
         switch (type) {
+        
+	        case FILE_NOTICE: {
+	            // ID,Base64(방),Base64(파일명),MIME,크기,Base64(발신자)
+	            String[] values = message.split(",", 6);
+	            if (values.length != 6) {
+	                break;
+	            }
+	
+	            long attachmentId = Long.parseLong(values[0]);
+	            String roomName = new String(
+	                    Base64.getDecoder().decode(values[1]),
+	                    StandardCharsets.UTF_8);
+	            String fileName = new String(
+	                    Base64.getDecoder().decode(values[2]),
+	                    StandardCharsets.UTF_8);
+	            int fileSize = Integer.parseInt(values[4]);
+	            String senderName = new String(
+	                    Base64.getDecoder().decode(values[5]),
+	                    StandardCharsets.UTF_8);
+	
+	            ChatPanel panel = Application.chatPanelMap.get(roomName);
+	            if (panel != null) {
+	                panel.showFileNotice(
+	                        attachmentId, senderName, fileName, fileSize);
+	            }
+	            break;
+	        }
+        
+	        case FILE_READY: {
+	            FileUploadClient.INSTANCE.onReady(message);
+	            break;
+	        }
+	
+	        case FILE_RESULT: {
+	            FileUploadClient.INSTANCE.onResult(message);
+	            break;
+	        }
         
 	        case EMOTICON_ASSET: {
 	            // 서버 형식: ID,Base64(이름),MIME,Base64(이미지)
