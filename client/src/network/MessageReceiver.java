@@ -490,6 +490,55 @@ public class MessageReceiver extends Thread {
                 break;
             }
 
+            case STORED_CHAT: {
+                // 저장된 일반 메시지를 ID와 함께 양쪽 화면에 전달한다.
+                String[] values = message.split(",", 5);
+                if (values.length != 5) break;
+                ChatPanel panel = Application.chatPanelMap.get(
+                        decodeReplyField(values[0]));
+                if (panel != null) {
+                    panel.addStoredChat(
+                            Long.parseLong(values[1]),
+                            decodeReplyField(values[2]),
+                            decodeReplyField(values[3]),
+                            decodeReplyField(values[4]));
+                }
+                break;
+            }
+
+            case REPLY_NOTICE: {
+                // 방, 새 ID, 원문 ID, 답장 발신자, 원문 발신자, 원문 미리보기, 답장
+                String[] values = message.split(",", 7);
+                if (values.length != 7) break;
+                ChatPanel panel = Application.chatPanelMap.get(
+                        decodeReplyField(values[0]));
+                if (panel != null) {
+                    panel.addReplyNotice(
+                            Long.parseLong(values[1]),
+                            decodeReplyField(values[3]),
+                            decodeReplyField(values[4]),
+                            decodeReplyField(values[5]),
+                            decodeReplyField(values[6]));
+                }
+                break;
+            }
+
+            case REPLY_RESULT: {
+                if ("ERROR".equals(message)) {
+                    JOptionPane.showMessageDialog(
+                            Application.lobbyFrame,
+                            "답장을 저장하지 못했습니다.");
+                    break;
+                }
+                String[] values = message.split(",", 4);
+                if (values.length == 4 && "OK".equals(values[0])) {
+                    ChatPanel panel = Application.chatPanelMap.get(
+                            decodeReplyField(values[1]));
+                    if (panel != null) panel.replySaved();
+                }
+                break;
+            }
+
             case MESSAGE: {
                 MessageResponse messageRes = new MessageResponse(message);
                 ChatPanel panel = Application.chatPanelMap.get(
@@ -542,5 +591,12 @@ public class MessageReceiver extends Thread {
                 LobbyFrame.chatRoomListPanel.paintChatRoomList();
                 break;
         }
+    }
+
+    // 응답의 Base64 필드를 UTF-8 문자열로 복원한다.
+    private static String decodeReplyField(String value) {
+        return new String(
+                Base64.getDecoder().decode(value),
+                StandardCharsets.UTF_8);
     }
 }

@@ -16,7 +16,8 @@ public class ChatHistoryDao {
 
     public static final int MAX_RECENT_MESSAGES = 30;
 
-    // 화면 표시와 응답 전송에 필요한 값만 담는다.
+    // 이전 대화 한 건을 화면에 전달할 때 필요한 정보다.
+    // 답장이 아닌 메시지는 마지막 세 값이 null이다.
     public record StoredMessage(
             long messageId,
             int senderUserId,
@@ -25,15 +26,18 @@ public class ChatHistoryDao {
             Integer recipientUserId,
             MessageType type,
             String content,
-            LocalDateTime sentAt) {
+            LocalDateTime sentAt,
+            Long replyToMessageId,
+            String originalSenderName,
+            String originalPreview) {
     }
 
     public List<StoredMessage> findRecent(
             String roomName, int viewerUserId) throws SQLException {
 
-        // 방별로 최신 30건을 먼저 선택한다.
-        // 일반 방은 DB 참여자만 조회할 수 있다.
-        // 귓속말은 발신자 또는 수신자 본인에게만 보인다.
+        // 최신 30건을 가져온다.
+        // 일반 방은 DB 참여자만 조회하고, 귓속말은 당사자에게만 보여준다.
+        // 답장의 원문은 같은 방의 공개 메시지에서만 찾는다.
         String sql = """
                 SELECT m.message_id,
                        m.sender_user_id,
@@ -41,21 +45,51 @@ public class ChatHistoryDao {
                        u.nickname AS sender_name,
                        m.recipient_user_id,
                        m.message_type,
-        		  	   CASE
-						    WHEN m.message_type = 'FILE' THEN
-						        COALESCE(
-						            CONCAT(
-						                a.attachment_id, '|',
-						                a.original_name, '|',
-						                a.file_size_bytes),
-						            '')
-						    ELSE m.content
-						END AS content,
-                       m.sent_at
+                       CASE
+                           WHEN m.message_type = 'FILE' THEN
+                               COALESCE(
+                                   CONCAT(
+                                       a.attachment_id, '|',
+                                       a.original_name, '|',
+                                       a.file_size_bytes),
+                                   '')
+                           ELSE m.content
+                       END AS content,
+                       m.sent_at,
+                       m.reply_to_message_id,
+                       original_author.nickname AS original_sender_name,
+                       CASE
+                           WHEN original.message_type = 'CHAT'
+                               THEN original.content
+                           WHEN original.message_type = 'IMAGE'
+                               THEN '[그림]'
+                           WHEN original.message_type = 'EMOTICON'
+                               THEN '[이모티콘]'
+                           WHEN original.message_type = 'FILE'
+                               THEN CONCAT(
+                                   '[파일] ',
+                                   COALESCE(
+                                       original_file.original_name,
+                                       '파일'))
+                       END AS original_preview
                 FROM chat_messages m
-                JOIN chat_rooms r ON r.room_id = m.room_id
-                JOIN users u ON u.user_id = m.sender_user_id
-                LEFT JOIN chat_attachments a ON a.message_id = m.message_id
+                JOIN chat_rooms r
+                    ON r.room_id = m.room_id
+                JOIN users u
+                    ON u.user_id = m.sender_user_id
+                LEFT JOIN chat_attachments a
+                    ON a.message_id = m.message_id
+                LEFT JOIN chat_messages original
+                    ON original.message_id = m.reply_to_message_id
+                   AND original.room_id = m.room_id
+                   AND original.message_type IN
+                       ('CHAT', 'IMAGE', 'EMOTICON', 'FILE')
+                LEFT JOIN users original_author
+                    ON original_author.user_id =
+                       original.sender_user_id
+                LEFT JOIN chat_attachments original_file
+                    ON original_file.message_id =
+                       original.message_id
                 WHERE r.room_name = ?
                   AND (
                       r.room_name = 'Lobby'
@@ -89,12 +123,19 @@ public class ChatHistoryDao {
 
             try (ResultSet result = statement.executeQuery()) {
                 while (result.next()) {
+                    // 귓속말이 아닌 메시지에는 수신자 ID가 없다.
                     int recipientId =
                             result.getInt("recipient_user_id");
-
                     Integer recipientUserId = result.wasNull()
                             ? null
                             : recipientId;
+
+                    // 일반 메시지는 답장 대상 ID가 NULL이다.
+                    long originalMessageId =
+                            result.getLong("reply_to_message_id");
+                    Long replyToMessageId = result.wasNull()
+                            ? null
+                            : originalMessageId;
 
                     messages.add(new StoredMessage(
                             result.getLong("message_id"),
@@ -106,13 +147,15 @@ public class ChatHistoryDao {
                                     result.getString("message_type")),
                             result.getString("content"),
                             result.getTimestamp("sent_at")
-                                    .toLocalDateTime()));
+                                    .toLocalDateTime(),
+                            replyToMessageId,
+                            result.getString("original_sender_name"),
+                            result.getString("original_preview")));
                 }
             }
         }
 
-        // SQL은 최신 건을 고르기 위해 내림차순으로 조회했다.
-        // 채팅창에는 오래된 메시지부터 보여주도록 뒤집는다.
+        // SQL은 최신 건부터 조회했다. 화면에는 오래된 순서로 표시한다.
         Collections.reverse(messages);
         return messages;
     }

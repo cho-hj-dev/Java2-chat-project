@@ -1,6 +1,12 @@
 package dto.type;
 
 public enum DtoType {
+	STORED_CHAT, // 서버 → 방 참여자 전체: 저장된 일반 채팅과 message_id
+	
+    REPLY_MESSAGE,  // 클라이언트 → 서버: 답장 전송
+    REPLY_RESULT,   // 서버 → 요청자: 저장 성공 또는 실패
+    REPLY_NOTICE,   // 서버 → 방 참여자: 저장된 답장 메시지
+	
     GALLERY_GET,          // 클라이언트 → 서버: 선택한 이미지 원본 요청
     GALLERY_IMAGE_BEGIN,  // 서버 → 클라이언트: 이미지 형식·크기·해시
     GALLERY_IMAGE_CHUNK,  // 서버 → 클라이언트: 이미지 바이트 조각

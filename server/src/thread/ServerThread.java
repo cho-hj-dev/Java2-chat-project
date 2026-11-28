@@ -51,6 +51,8 @@ import service.FileUploadSession;
 
 import dao.ImageGalleryDao;
 
+import dao.ChatReplyDao;
+
 public class ServerThread extends Thread {
 
     Socket socket; // 담당자 (not 문지기)
@@ -78,6 +80,8 @@ public class ServerThread extends Thread {
     //(7주차) 모든 접속 스레드가 같은 날씨 결과를 사용해야 10분 캐시가 작동한다.
     private static final WeatherService WEATHER_SERVICE =
             new WeatherService();
+    
+    private final ChatReplyDao chatReplyDao = new ChatReplyDao();
 
     public ServerThread(Socket socket, ChatService chatService) {
         this.socket = socket;
@@ -478,6 +482,11 @@ public class ServerThread extends Thread {
                 }
                 break;
             }
+            
+            case REPLY_MESSAGE: {
+                handleReplyMessage(message);
+                break;
+            }
 
             case MESSAGE: {
                 synchronized (chatService) {
@@ -580,30 +589,43 @@ public class ServerThread extends Thread {
 	                 break;
 	             }
 		
+	             long savedMessageId;
 	             try {
-	            	    chatMessageDao.save(
-	            	            targetRoom.getName(),
-	            	            loggedInUser.getMemberId(),
-	            	            null,
-	            	            received.getMessageType(),
-	            	            received.getMessage());
+	                 savedMessageId = chatMessageDao.save(
+	                         targetRoom.getName(),
+	                         loggedInUser.getMemberId(),
+	                         null,
+	                         received.getMessageType(),
+	                         received.getMessage());
 	             } catch (SQLException | IllegalArgumentException exception) {
-	            	    System.err.println(
-	            	            "메시지 저장 실패: "
-	            	            + exception.getClass().getSimpleName());
-	            	    break;
-	            	}
+	                 System.err.println("메시지 저장 실패: "
+	                         + exception.getClass().getSimpleName());
+	                 break;
+	             }
 
-                // 닉네임은 클라이언트가 적어 보낸 값 대신 서버의 로그인 정보로 정한다.
-                // 따라서 다른 사용자의 이름을 임의로 적어 보낼 수 없다.
-                MessageResponse outgoing = new MessageResponse(
-                        received.getMessageType(),
-                        received.getChatRoomName(),
-                        loggedInUser.getName(),
-                        received.getMessage()
-                );
-                sendMessage(outgoing);
-                break;
+	             if (received.getMessageType() == MessageType.CHAT) {
+	            	    // ID와 발신자의 로그인 ID까지 함께 보낸다.
+	            	    // 발신자에게도 보내므로 화면에는 이 응답을 받았을 때 한 번만 표시한다.
+	            	    String storedChat =
+	            	            "STORED_CHAT:"
+	            	            + encodeReplyField(targetRoom.getName()) + ","
+	            	            + savedMessageId + ","
+	            	            + encodeReplyField(loggedInUser.getId()) + ","
+	            	            + encodeReplyField(loggedInUser.getName()) + ","
+	            	            + encodeReplyField(received.getMessage());
+
+	            	    for (User roomUser :
+	            	            new java.util.ArrayList<>(targetRoom.getUsers())) {
+	            	        writeResponse(roomUser.getSocket(), storedChat);
+	            	    }
+	            	} else {
+	            	    MessageResponse outgoing = new MessageResponse(
+	            	            received.getMessageType(),
+	            	            targetRoom.getName(),
+	            	            loggedInUser.getName(),
+	            	            received.getMessage());
+	            	    sendMessage(outgoing);
+	            	}
                 }
             }
                 
@@ -1189,6 +1211,87 @@ public class ServerThread extends Thread {
         return java.util.Base64.getEncoder().encodeToString(
                 value.getBytes(java.nio.charset.StandardCharsets.UTF_8));
     }
+    
+    private void handleReplyMessage(String message) {
+        try {
+            ReplyMessageRequest request =
+                    new ReplyMessageRequest(message);
+
+            synchronized (chatService) {
+                ChatRoom room = chatService.getChatRoom(
+                        request.getRoomName());
+
+                // DB 참여자 검사에 더해 실제 방에 입장한 사용자만
+                // 이 소켓으로 답장을 보낼 수 있게 한다.
+                if (room == null
+                        || !room.getUsers().contains(loggedInUser)) {
+                    writeResponse(socket, "REPLY_RESULT:ERROR");
+                    return;
+                }
+
+                // 원문이 이 방에 있고 열람 가능한지 먼저 확인한다.
+                Optional<ChatReplyDao.ReplyTarget> found =
+                        chatReplyDao.findTarget(
+                                request.getRoomName(),
+                                loggedInUser.getMemberId(),
+                                request.getTargetMessageId());
+
+                if (found.isEmpty()) {
+                    writeResponse(socket, "REPLY_RESULT:ERROR");
+                    return;
+                }
+
+                ChatReplyDao.ReplyTarget target = found.get();
+
+                // 저장 시점에 같은 방·참여 여부를 DAO가 다시 검사한다.
+                // 반환값은 새로 저장된 답장 메시지의 ID다.
+                long newMessageId = chatReplyDao.saveReply(
+                        request.getRoomName(),
+                        loggedInUser.getMemberId(),
+                        target.messageId(),
+                        request.getReplyText());
+
+                String encodedRoom =
+                        encodeReplyField(request.getRoomName());
+
+                // 요청자에게 먼저 저장 결과와 새 메시지 ID를 보낸다.
+                writeResponse(socket,
+                        "REPLY_RESULT:OK,"
+                        + encodedRoom + ","
+                        + newMessageId + ","
+                        + target.messageId());
+
+                // 발신자를 포함한 현재 방 사용자 모두에게 답장을 보낸다.
+                // 클라이언트는 이 알림으로 화면에 답장을 한 번 표시한다.
+                String notice =
+                        "REPLY_NOTICE:"
+                        + encodedRoom + ","
+                        + newMessageId + ","
+                        + target.messageId() + ","
+                        + encodeReplyField(loggedInUser.getName()) + ","
+                        + encodeReplyField(target.senderName()) + ","
+                        + encodeReplyField(target.preview()) + ","
+                        + encodeReplyField(request.getReplyText());
+
+                for (User user :
+                        new java.util.ArrayList<>(room.getUsers())) {
+                    writeResponse(user.getSocket(), notice);
+                }
+            }
+
+        } catch (IllegalArgumentException | SQLException exception) {
+            // 요청 내용은 로그에 남기지 않는다.
+            System.err.println("답장 처리 실패: "
+                    + exception.getClass().getSimpleName());
+            writeResponse(socket, "REPLY_RESULT:ERROR");
+        }
+    }
+
+    private static String encodeReplyField(String value) {
+        return java.util.Base64.getEncoder().encodeToString(
+                value.getBytes(
+                        java.nio.charset.StandardCharsets.UTF_8));
+    }
 
     private void handleChatSearch(String message) {
         String roomName = "";
@@ -1284,7 +1387,10 @@ public class ServerThread extends Thread {
                             item.recipientUserId(),
                             item.type(),
                             item.content(),
-                            item.sentAt()));
+                            item.sentAt(),
+                            item.replyToMessageId(),
+                            item.originalSenderName(),
+                            item.originalPreview()));
                 }
             }
 
