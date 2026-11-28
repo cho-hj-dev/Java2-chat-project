@@ -25,6 +25,9 @@ public class MessageSender {
             PrintWriter writer = new PrintWriter(socket.getOutputStream(), true);
 
             switch (type) {
+	            case ADMIN_ACCESS:
+	                writer.println((AdminAccessRequest) dto);
+	                break;
 	            case PUBLIC_PROFILE_GET:
 	                writer.println((PublicProfileRequest) dto);
 	                break;

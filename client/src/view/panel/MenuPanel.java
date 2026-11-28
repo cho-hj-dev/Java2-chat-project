@@ -2,6 +2,7 @@ package view.panel;
 
 import domain.User;
 import dto.request.InviteChatRequest;
+import dto.request.AdminAccessRequest;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -33,6 +34,7 @@ public class MenuPanel extends JPanel {
     private ProfileFrame profileFrame;
     private final JButton toolsBtn = new JButton("도구");
     private final JPopupMenu toolsMenu = new JPopupMenu();
+    private final JMenuItem adminItem = new JMenuItem("관리자 화면");
     private boolean exitPending = false;
 
     public MenuPanel(JFrame frame, String chatRoomName) {
@@ -71,8 +73,19 @@ public class MenuPanel extends JPanel {
         gameItem.addActionListener(event -> new TicTacToeFrame());
         toolsMenu.add(gameItem);
 
+        adminItem.addActionListener(event -> {
+            if (Application.sender == null
+                    || !Application.sender.sendMessage(new AdminAccessRequest())) {
+                JOptionPane.showMessageDialog(frame,
+                        "관리자 권한 확인 요청을 보내지 못했습니다.");
+            }
+        });
+        toolsMenu.add(adminItem);
+
         toolsBtn.setBounds(200, 10, 85, 35);
         toolsBtn.addActionListener(event -> {
+            adminItem.setVisible(Application.me != null
+                    && Application.me.isAdmin());
             // 하단 버튼이므로 메뉴를 버튼 위쪽으로 펼친다.
             toolsMenu.show(
                     toolsBtn, 0, -toolsMenu.getPreferredSize().height);

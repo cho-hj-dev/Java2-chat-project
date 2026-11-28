@@ -98,7 +98,8 @@ public class LoginFrame extends JFrame implements ActionListener {
         loginBtn.setText(pending ? "로그인 중..." : "로그인");
     }
 
-    public void showLoginResult(String status, String loginId, String nickname) {
+    public void showLoginResult(String status, String loginId,
+                                String nickname, String userRole) {
         if (!isDisplayable() || !loginPending) return;
         if ("SUCCESS".equals(status)) {
             if (!idTextF.getText().trim().equals(loginId)) {
@@ -106,7 +107,12 @@ public class LoginFrame extends JFrame implements ActionListener {
                 showError("로그인 응답의 아이디가 일치하지 않습니다.");
                 return;
             }
-            Application.me = new User(loginId, nickname);
+            if (!"USER".equals(userRole) && !"ADMIN".equals(userRole)) {
+                setLoginPending(false);
+                showError("로그인 권한 정보가 올바르지 않습니다.");
+                return;
+            }
+            Application.me = User.loggedIn(loginId, nickname, userRole);
             passwordField.setText("");
             Application.loginFrame = null;
             dispose();

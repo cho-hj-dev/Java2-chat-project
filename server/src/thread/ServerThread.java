@@ -140,8 +140,14 @@ public class ServerThread extends Thread {
 
     private void sendLoginResult(LoginResultResponse.Status status,
                                  String loginId, String nickname) throws IOException {
+        sendLoginResult(status, loginId, nickname, "USER");
+    }
+
+    private void sendLoginResult(LoginResultResponse.Status status,
+                                 String loginId, String nickname,
+                                 String userRole) throws IOException {
         PrintWriter writer = new PrintWriter(socket.getOutputStream(), true);
-        writer.println(new LoginResultResponse(status, loginId, nickname));
+        writer.println(new LoginResultResponse(status, loginId, nickname, userRole));
         if (writer.checkError()) throw new IOException("Login response send failed.");
     }
 
@@ -317,6 +323,21 @@ public class ServerThread extends Thread {
     private void processReceiveMessage(DtoType type, String message)
             throws UserNotFoundException, ChatRoomNotFoundException, ChatRoomExistException, IOException {
         switch (type) {
+	        case ADMIN_ACCESS: {
+	            String status = "DENIED";
+	            if (loggedInUser != null && message.isEmpty()) {
+	                try {
+	                    status = new UserDao().isAdmin(loggedInUser.getMemberId())
+	                            ? "OK" : "DENIED";
+	                } catch (SQLException e) {
+	                    System.err.println("관리자 권한 조회 DB 오류 코드: "
+	                            + e.getErrorCode());
+	                    status = "ERROR";
+	                }
+	            }
+	            writeResponse(socket, DtoType.ADMIN_ACCESS_RESULT + ":" + status);
+	            break;
+	        }
 	        case FILE_GET: {
 	            handleFileGet(message);
 	            break;
@@ -463,7 +484,8 @@ public class ServerThread extends Thread {
                     sendLoginResult(
                             LoginResultResponse.Status.SUCCESS,
                             user.getId(),
-                            user.getName());
+                            user.getName(),
+                            user.getUserRole());
                     
                     // 클라이언트가 이전 대화를 그리기 전에 DB의 이모티콘 이미지를 보낸다.
                     sendEmoticonAssets();

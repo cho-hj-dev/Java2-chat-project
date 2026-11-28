@@ -135,7 +135,8 @@ public class UserDao {
     public Optional<Member> authenticate(String loginId, char[] password)
             throws SQLException, GeneralSecurityException {
         String sql = """
-                SELECT user_id, login_id, password_hash, nickname, created_at
+                SELECT user_id, login_id, password_hash, nickname,
+                       created_at, user_role
                 FROM users
                 WHERE login_id = ?
                 """;
@@ -159,10 +160,23 @@ public class UserDao {
                         result.getInt("user_id"),
                         result.getString("login_id"),
                         result.getString("nickname"),
-                        result.getTimestamp("created_at").toLocalDateTime()
+                        result.getTimestamp("created_at").toLocalDateTime(),
+                        result.getString("user_role")
                 );
 
                 return Optional.of(member);
+            }
+        }
+    }
+
+    public boolean isAdmin(int memberId) throws SQLException {
+        String sql = "SELECT user_role FROM users WHERE user_id = ?";
+        try (Connection connection = DBConnection.getConnection();
+             PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setInt(1, memberId);
+            try (ResultSet result = statement.executeQuery()) {
+                return result.next()
+                        && "ADMIN".equals(result.getString("user_role"));
             }
         }
     }

@@ -1,6 +1,8 @@
 package dto.type;
 
 public enum DtoType {
+	ADMIN_ACCESS, // 관리자 화면 진입 권한 확인
+	ADMIN_ACCESS_RESULT,
 	STORED_CHAT, // 서버 → 방 참여자 전체: 저장된 일반 채팅과 message_id
 	
     REPLY_MESSAGE,  // 클라이언트 → 서버: 답장 전송
