@@ -66,7 +66,7 @@ public class MessageReceiver extends Thread {
                     } catch (RuntimeException e) {
                         System.err.println("Invalid server response: " + type);
                         if (type == DtoType.LOGIN_RESULT && Application.loginFrame != null) {
-                            Application.loginFrame.showLoginResult("ERROR", "", "");
+                            Application.loginFrame.showLoginResult("ERROR", "", "", "USER");
                         }
                     }
                 });
@@ -85,7 +85,7 @@ public class MessageReceiver extends Thread {
             
             SwingUtilities.invokeLater(() -> {
                 if (Application.loginFrame != null) {
-                    Application.loginFrame.showLoginResult("ERROR", "", "");
+                    Application.loginFrame.showLoginResult("ERROR", "", "", "USER");
                 }
                 if (Application.profileFrame != null) {
                     Application.profileFrame.profileConnectionFailed();
@@ -112,6 +112,22 @@ public class MessageReceiver extends Thread {
     	        && type != DtoType.ACCOUNT_RECOVERY_RESULT) return;
 
         switch (type) {
+	        case ADMIN_ACCESS_RESULT: {
+	            if ("OK".equals(message)) {
+	                if (Application.adminFrame == null
+	                        || !Application.adminFrame.isDisplayable()) {
+	                    Application.adminFrame = new view.frame.AdminFrame(
+	                            Application.lobbyFrame);
+	                }
+	                Application.adminFrame.setVisible(true);
+	                Application.adminFrame.toFront();
+	            } else {
+	                javax.swing.JOptionPane.showMessageDialog(
+	                        Application.lobbyFrame,
+	                        "관리자 화면에 접근할 수 없습니다.");
+	            }
+	            break;
+	        }
         
 	        case GALLERY_ITEM: {
 	            // 방, 메시지 ID, 첨부 ID, 발신자, 출처, 이름, MIME, 전송 시각
@@ -364,11 +380,12 @@ public class MessageReceiver extends Thread {
 	        
             case LOGIN_RESULT: {
                 String[] result = message.split(",", -1);
-                if (result.length != 3) throw new IllegalArgumentException("Invalid login result");
+                if (result.length != 4) throw new IllegalArgumentException("Invalid login result");
                 String loginId = new String(Base64.getDecoder().decode(result[1]), StandardCharsets.UTF_8);
                 String nickname = new String(Base64.getDecoder().decode(result[2]), StandardCharsets.UTF_8);
                 if (Application.loginFrame != null) {
-                    Application.loginFrame.showLoginResult(result[0], loginId, nickname);
+                    Application.loginFrame.showLoginResult(result[0], loginId,
+                            nickname, result[3]);
                 }
                 break;
             }

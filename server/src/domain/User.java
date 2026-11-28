@@ -15,10 +15,12 @@ public class User {
     private Date createdAt; // 로그인 시점
     
     private int memberId;
+    private final String userRole;
 
     public User(Socket socket, Member member) {
         this.socket = socket;
         this.memberId = member.getUserId();
+        this.userRole = member.getUserRole();
         this.id = member.getLoginId();
         this.name = member.getNickname();
         this.createdAt = new Date();
@@ -29,6 +31,10 @@ public class User {
     
     public int getMemberId() {
         return memberId;
+    }
+
+    public String getUserRole() {
+        return userRole;
     }
     
     public String getId() {
