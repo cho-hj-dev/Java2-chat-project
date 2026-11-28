@@ -72,7 +72,8 @@ public class ServerThread extends Thread {
     
  // 클라이언트가 임의의 내용 대신 정해진 이모티콘 ID만 보내도록 제한한다.
     private static final Set<String> VALID_EMOTICON_IDS = Set.of(
-            "SMILE", "LAUGH", "WINK", "SAD", "ANGRY", "HEART");
+            "SMILE", "LAUGH", "WINK", "SAD", "ANGRY", "HEART",
+            "GIF_01", "GIF_02", "GIF_03");
     
     //(7주차) 모든 접속 스레드가 같은 날씨 결과를 사용해야 10분 캐시가 작동한다.
     private static final WeatherService WEATHER_SERVICE =
