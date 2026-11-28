@@ -28,6 +28,7 @@ public class ProfileFrame extends JFrame {
 
     private final JTextField idField = new JTextField();
     private final JTextField nicknameField = new JTextField();
+    private final JTextField statusMessageField = new JTextField();
     private final JTextField postalCodeField = new JTextField();
     private final JTextField addressField = new JTextField();
     private final JTextField addressDetailField = new JTextField();
@@ -96,6 +97,7 @@ public class ProfileFrame extends JFrame {
 
         addRow(form, "아이디", idField);
         addRow(form, "닉네임", nicknameField);
+        addRow(form, "상태 메시지", statusMessageField);
         addRow(form, "우편번호", postalCodeField);
         addRow(form, "기본주소", addressField);
         addRow(form, "상세주소", addressDetailField);
@@ -182,6 +184,7 @@ public class ProfileFrame extends JFrame {
         boolean editable = loaded && !busy;
 
         nicknameField.setEditable(editable);
+        statusMessageField.setEditable(editable);
         postalCodeField.setEditable(editable);
         addressField.setEditable(editable);
         addressDetailField.setEditable(editable);
@@ -287,7 +290,7 @@ public class ProfileFrame extends JFrame {
             return;
         }
 
-        if (parts.length != 9 || !"SUCCESS".equals(parts[1])) {
+        if (parts.length != 10 || !"SUCCESS".equals(parts[1])) {
             loaded = false;
             finishRequest();
             statusLabel.setText("프로필 조회 실패. 연결과 로그인 상태를 확인하세요.");
@@ -297,9 +300,10 @@ public class ProfileFrame extends JFrame {
         try {
             String loginId = decodeText(parts[2]);
             String nickname = decodeText(parts[3]);
-            String postalCode = decodeText(parts[4]);
-            String address = decodeText(parts[5]);
-            String detail = decodeText(parts[6]);
+            String statusMessage = decodeText(parts[4]);
+            String postalCode = decodeText(parts[5]);
+            String address = decodeText(parts[6]);
+            String detail = decodeText(parts[7]);
 
             if (Application.me == null
                     || !loginId.equals(Application.me.getId())) {
@@ -308,15 +312,16 @@ public class ProfileFrame extends JFrame {
 
             ImageIcon photo = null;
 
-            if ("OK".equals(parts[7])) {
-                photo = new ImageIcon(decodePhoto(parts[8]));
-            } else if (!"NONE".equals(parts[7])
-                    && !"MISSING".equals(parts[7])) {
+            if ("OK".equals(parts[8])) {
+                photo = new ImageIcon(decodePhoto(parts[9]));
+            } else if (!"NONE".equals(parts[8])
+                    && !"MISSING".equals(parts[8])) {
                 throw new IllegalArgumentException("Invalid image status");
             }
 
             idField.setText(loginId);
             nicknameField.setText(nickname);
+            statusMessageField.setText(statusMessage);
             postalCodeField.setText(postalCode);
             addressField.setText(address);
             addressDetailField.setText(detail);
@@ -325,7 +330,7 @@ public class ProfileFrame extends JFrame {
 
             photoLabel.setIcon(photo);
             photoLabel.setText(photo != null ? ""
-                    : "MISSING".equals(parts[7])
+                    : "MISSING".equals(parts[8])
                     ? "사진 파일을 불러올 수 없습니다."
                     : "등록된 사진 없음");
 
@@ -334,7 +339,7 @@ public class ProfileFrame extends JFrame {
             loaded = true;
             finishRequest();
 
-            statusLabel.setText("MISSING".equals(parts[7])
+            statusLabel.setText("MISSING".equals(parts[8])
                     ? "정보 조회 완료. 서버의 사진 파일을 확인하세요."
                     : "조회 완료. 변경 후 저장을 누르세요.");
 
@@ -406,12 +411,19 @@ public class ProfileFrame extends JFrame {
         }
 
         String nickname = nicknameField.getText().trim();
+        String statusMessage = statusMessageField.getText().trim();
         String postalCode = postalCodeField.getText().trim();
         String address = addressField.getText().trim();
         String detail = addressDetailField.getText().trim();
 
         if (!nickname.matches("[^,:|+\\p{Cntrl}]{1,50}")) {
             showError("닉네임은 1~50자이며 쉼표, :, |, +, 제어문자는 사용할 수 없습니다.");
+            return;
+        }
+
+        if (statusMessage.length() > 255
+                || Pattern.compile("\\p{Cntrl}").matcher(statusMessage).find()) {
+            showError("상태 메시지는 255자 이하로 입력하세요.");
             return;
         }
 
@@ -459,6 +471,7 @@ public class ProfileFrame extends JFrame {
         ProfileUpdateRequest request = new ProfileUpdateRequest(
                 pendingRequestId,
                 nickname,
+                statusMessage,
                 postalCode,
                 address,
                 detail,
@@ -518,6 +531,7 @@ public class ProfileFrame extends JFrame {
             case "WRONG_PASSWORD" -> "현재 비밀번호가 올바르지 않습니다.";
             case "INVALID_PASSWORD" -> "새 비밀번호 조건을 확인하세요.";
             case "INVALID_NICKNAME" -> "닉네임 입력값을 확인하세요.";
+            case "INVALID_STATUS_MESSAGE" -> "상태 메시지는 255자 이하로 입력하세요.";
             case "INVALID_ADDRESS" -> "우편번호와 주소 입력값을 확인하세요.";
             case "INVALID_IMAGE" -> "사진을 다시 선택하세요.";
             case "UNAUTHORIZED" -> "다시 로그인하세요.";

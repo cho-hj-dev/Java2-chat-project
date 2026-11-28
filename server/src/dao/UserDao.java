@@ -3,6 +3,7 @@ package dao;
 import db.DBConnection;
 import domain.Member;
 import domain.MemberProfile;
+import domain.PublicProfile;
 
 import java.sql.Connection;
 import java.sql.PreparedStatement;
@@ -14,6 +15,28 @@ import security.PasswordHasher;
 import java.security.GeneralSecurityException;
 
 public class UserDao {
+
+    public Optional<PublicProfile> findPublicProfileByLoginId(String loginId)
+            throws SQLException {
+        String sql = """
+                SELECT login_id, nickname, status_message,
+                       profile_image_path, created_at
+                FROM users WHERE login_id = ?
+                """;
+        try (Connection connection = DBConnection.getConnection();
+             PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setString(1, loginId);
+            try (ResultSet result = statement.executeQuery()) {
+                if (!result.next()) return Optional.empty();
+                return Optional.of(new PublicProfile(
+                        result.getString("login_id"),
+                        result.getString("nickname"),
+                        result.getString("status_message"),
+                        result.getString("profile_image_path"),
+                        result.getTimestamp("created_at").toLocalDateTime()));
+            }
+        }
+    }
 
     // 비밀번호 원문이 아닌, 해시 처리된 값을 전달받음.
     public int insert(String loginId, String passwordHash,
@@ -149,7 +172,7 @@ public class UserDao {
             throws SQLException {
 
         String sql = """
-                SELECT login_id, nickname, postal_code,
+                SELECT login_id, nickname, status_message, postal_code,
                        address, address_detail, profile_image_path
                 FROM users
                 WHERE user_id = ?
@@ -168,6 +191,7 @@ public class UserDao {
                 MemberProfile profile = new MemberProfile(
                         result.getString("login_id"),
                         result.getString("nickname"),
+                        result.getString("status_message"),
                         result.getString("postal_code"),
                         result.getString("address"),
                         result.getString("address_detail"),

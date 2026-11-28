@@ -19,6 +19,7 @@ public class ProfileDao {
     public String update(
             int memberId,
             String nickname,
+            String statusMessage,
             String postalCode,
             String address,
             String addressDetail,
@@ -29,6 +30,7 @@ public class ProfileDao {
     ) throws SQLException, IOException, GeneralSecurityException {
 
         nickname = nickname.trim();
+        statusMessage = statusMessage.trim();
         postalCode = postalCode.trim();
         address = address.trim();
         addressDetail = addressDetail.trim();
@@ -36,6 +38,11 @@ public class ProfileDao {
         // 기존 채팅 메시지 구분자로 사용하는 문자도 제외
         if (!nickname.matches("[^,:|+\\p{Cntrl}]{1,50}")) {
             return "INVALID_NICKNAME";
+        }
+
+        if (statusMessage.length() > 255
+                || Pattern.compile("\\p{Cntrl}").matcher(statusMessage).find()) {
+            return "INVALID_STATUS_MESSAGE";
         }
 
         boolean hasAddress =
@@ -190,6 +197,7 @@ public class ProfileDao {
                 String updateSql = """
                         UPDATE users
                         SET nickname = ?,
+                            status_message = ?,
                             postal_code = ?,
                             address = ?,
                             address_detail = ?,
@@ -202,12 +210,13 @@ public class ProfileDao {
                         connection.prepareStatement(updateSql)) {
 
                     statement.setString(1, nickname);
-                    statement.setString(2, emptyToNull(postalCode));
-                    statement.setString(3, emptyToNull(address));
-                    statement.setString(4, emptyToNull(addressDetail));
-                    statement.setString(5, finalImagePath);
-                    statement.setString(6, newHash);
-                    statement.setInt(7, memberId);
+                    statement.setString(2, emptyToNull(statusMessage));
+                    statement.setString(3, emptyToNull(postalCode));
+                    statement.setString(4, emptyToNull(address));
+                    statement.setString(5, emptyToNull(addressDetail));
+                    statement.setString(6, finalImagePath);
+                    statement.setString(7, newHash);
+                    statement.setInt(8, memberId);
 
                     statement.executeUpdate();
                 }

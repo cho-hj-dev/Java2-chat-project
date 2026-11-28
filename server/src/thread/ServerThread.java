@@ -406,6 +406,11 @@ public class ServerThread extends Thread {
         		sendProfile(message);
         		break;
         	}
+
+            case PUBLIC_PROFILE_GET: {
+                sendPublicProfile(message);
+                break;
+            }
         	
         	case PROFILE_UPDATE: {
         	    updateProfile(message);
@@ -1525,6 +1530,59 @@ public class ServerThread extends Thread {
         }
     }
     
+    private void sendPublicProfile(String request) {
+        String[] values = request.split(",", -1);
+        if (values.length != 2 || request.length() > 128) return;
+        String requestId = values[0];
+        String targetId;
+        try {
+            if (!java.util.UUID.fromString(requestId).toString()
+                    .equals(requestId)) return;
+            targetId = new String(java.util.Base64.getDecoder().decode(values[1]),
+                    java.nio.charset.StandardCharsets.UTF_8);
+        } catch (IllegalArgumentException e) {
+            return;
+        }
+
+        PublicProfileResponse response;
+        if (loggedInUser == null) {
+            response = new PublicProfileResponse(requestId, "UNAUTHORIZED",
+                    null, "NONE", "");
+        } else if (!targetId.matches("[A-Za-z0-9_]{4,20}")) {
+            response = new PublicProfileResponse(requestId, "INVALID_INPUT",
+                    null, "NONE", "");
+        } else {
+            try {
+                var found = new UserDao().findPublicProfileByLoginId(targetId);
+                if (found.isEmpty()) {
+                    response = new PublicProfileResponse(requestId, "NOT_FOUND",
+                            null, "NONE", "");
+                } else {
+                    var profile = found.get();
+                    String image = "";
+                    String imageStatus = "NONE";
+                    if (profile.imagePath() != null
+                            && !profile.imagePath().isBlank()) {
+                        try {
+                            image = ProfileImageStore.readEncoded(profile.imagePath());
+                            imageStatus = "OK";
+                        } catch (IOException e) {
+                            imageStatus = "MISSING";
+                        }
+                    }
+                    response = new PublicProfileResponse(requestId, "SUCCESS",
+                            profile, imageStatus, image);
+                }
+            } catch (SQLException e) {
+                System.err.println("공개 프로필 조회 DB 오류 코드: "
+                        + e.getErrorCode());
+                response = new PublicProfileResponse(requestId, "ERROR",
+                        null, "NONE", "");
+            }
+        }
+        writeResponse(socket, response);
+    }
+
     private void sendProfile(String requestId) throws IOException {
         // 요청에는 회원 번호가 아닌 요청 식별용 UUID만 허용
         try {
@@ -1647,24 +1705,26 @@ public class ServerThread extends Thread {
 
         if (loggedInUser == null) {
             status = "UNAUTHORIZED";
-        } else if (values.length != 9 || message.length() > 400_000) {
+        } else if (values.length != 10 || message.length() > 400_000) {
             status = "INVALID_INPUT";
         } else {
             try {
                 String nickname = decodeProfileValue(values[1]);
-                String postalCode = decodeProfileValue(values[2]);
-                String address = decodeProfileValue(values[3]);
-                String addressDetail = decodeProfileValue(values[4]);
+                String statusMessage = decodeProfileValue(values[2]);
+                String postalCode = decodeProfileValue(values[3]);
+                String address = decodeProfileValue(values[4]);
+                String addressDetail = decodeProfileValue(values[5]);
 
-                String imageAction = values[5];
-                String imageData = values[6];
+                String imageAction = values[6];
+                String imageData = values[7];
 
-                String currentPassword = decodeProfileValue(values[7]);
-                String newPassword = decodeProfileValue(values[8]);
+                String currentPassword = decodeProfileValue(values[8]);
+                String newPassword = decodeProfileValue(values[9]);
 
                 status = new dao.ProfileDao().update(
                         loggedInUser.getMemberId(),
                         nickname,
+                        statusMessage,
                         postalCode,
                         address,
                         addressDetail,

@@ -12,6 +12,7 @@ public class ProfileUpdateRequest extends DTO {
     public ProfileUpdateRequest(
             String requestId,
             String nickname,
+            String statusMessage,
             String postalCode,
             String address,
             String addressDetail,
@@ -25,6 +26,7 @@ public class ProfileUpdateRequest extends DTO {
         payload = String.join(",",
                 UUID.fromString(requestId).toString(),
                 encode(nickname),
+                encode(statusMessage),
                 encode(postalCode),
                 encode(address),
                 encode(addressDetail),

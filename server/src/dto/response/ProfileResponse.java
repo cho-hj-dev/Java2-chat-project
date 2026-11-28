@@ -41,7 +41,7 @@ public class ProfileResponse extends DTO {
     @Override
     public String toString() {
         MemberProfile data = profile == null
-                ? new MemberProfile("", "", "", "", "", "")
+                ? new MemberProfile("", "", "", "", "", "", "")
                 : profile;
 
         return super.toString() + String.join(",",
@@ -49,6 +49,7 @@ public class ProfileResponse extends DTO {
                 status,
                 encode(data.loginId()),
                 encode(data.nickname()),
+                encode(data.statusMessage()),
                 encode(data.postalCode()),
                 encode(data.address()),
                 encode(data.addressDetail()),

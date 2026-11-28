@@ -4,6 +4,7 @@ package domain;
 public record MemberProfile(
         String loginId,
         String nickname,
+        String statusMessage,
         String postalCode,
         String address,
         String addressDetail,
