@@ -17,6 +17,9 @@ public class ChatHistoryItemResponse extends DTO {
     private final MessageType messageType;
     private final String content;
     private final LocalDateTime sentAt;
+    private final Long replyToMessageId;
+    private final String originalSenderName;
+    private final String originalPreview;
 
     public ChatHistoryItemResponse(
             String roomName,
@@ -26,7 +29,10 @@ public class ChatHistoryItemResponse extends DTO {
             Integer recipientUserId,
             MessageType messageType,
             String content,
-            LocalDateTime sentAt) {
+            LocalDateTime sentAt,
+            Long replyToMessageId,
+            String originalSenderName,
+            String originalPreview) {
 
         super(DtoType.CHAT_HISTORY_ITEM);
         this.roomName = roomName;
@@ -37,6 +43,9 @@ public class ChatHistoryItemResponse extends DTO {
         this.messageType = messageType;
         this.content = content;
         this.sentAt = sentAt;
+        this.replyToMessageId = replyToMessageId;
+        this.originalSenderName = originalSenderName;
+        this.originalPreview = originalPreview;
     }
 
     @Override
@@ -53,7 +62,11 @@ public class ChatHistoryItemResponse extends DTO {
                 + (recipientUserId == null ? "" : recipientUserId) + ","
                 + messageType.name() + ","
                 + sentAt + ","
-                + encode(content);
+                + encode(content) + ","
+                + (replyToMessageId == null ? "" : replyToMessageId) + ","
+                + encode(originalSenderName == null ? "" : originalSenderName) + ","
+                + encode(originalPreview == null ? "" : originalPreview);
+                
     }
 
     private static String encode(String value) {

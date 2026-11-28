@@ -6,6 +6,7 @@ import javax.swing.JTextArea;
 import app.Application;
 import domain.User;
 import dto.request.MessageRequest;
+import dto.request.ReplyMessageRequest;
 import dto.response.ChatHistoryItem;
 import dto.response.ChatSearchItem;
 import dto.type.MessageType;
@@ -21,6 +22,8 @@ import java.awt.Font;
 import java.awt.Image;
 import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
+import java.awt.event.MouseAdapter;
+import java.awt.event.MouseEvent;
 import java.awt.image.BufferedImage;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -38,6 +41,7 @@ import javax.swing.ImageIcon;
 import javax.swing.JButton;
 import javax.swing.JFileChooser;
 import javax.swing.JFrame;
+import javax.swing.JLabel;
 import javax.swing.JMenuItem;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
@@ -46,6 +50,7 @@ import javax.swing.JScrollPane;
 import javax.swing.JTextField;
 import javax.swing.JTextPane;
 import javax.swing.text.BadLocationException;
+import javax.swing.text.AttributeSet;
 import javax.swing.text.SimpleAttributeSet;
 import javax.swing.text.StyleConstants;
 import javax.swing.text.StyledDocument;
@@ -56,6 +61,9 @@ import network.ImageGalleryClient;
 public class ChatPanel extends JPanel implements ActionListener {
 
     private static final int MAX_PNG_BYTES = 256 * 1024;
+    private static final String REPLY_ID_ATTRIBUTE = "replyMessageId";
+    private static final String REPLY_SENDER_ATTRIBUTE = "replySender";
+    private static final String REPLY_TEXT_ATTRIBUTE = "replyText";
     private static final DateTimeFormatter HISTORY_TIME_FORMAT =
             DateTimeFormatter.ofPattern("MM-dd HH:mm");
 
@@ -82,6 +90,9 @@ public class ChatPanel extends JPanel implements ActionListener {
     // JTextPane은 텍스트와 그림을 한 채팅 영역에 표시할 수 있다.
     private final JTextPane chatPane = new JTextPane();
     private final JTextField msgTextF = new JTextField(50);
+    private final JLabel replyPreview = new JLabel();
+    private final JButton cancelReplyBtn = new JButton("×");
+    private long replyTargetId;
 
     private final JButton sendBtn = new JButton("전송");
     private final JButton drawingBtn = new JButton("그림판");
@@ -145,8 +156,43 @@ public class ChatPanel extends JPanel implements ActionListener {
         searchBtn.addActionListener(event -> openSearchDialog());
         add(searchBtn);
 
-        scrollPane.setBounds(10, 35, 380, 415);
+        // 입력창 바로 위에 답장 원문을 보여줄 공간을 확보한다.
+        scrollPane.setBounds(10, 35, 380, 380);
         add(scrollPane);
+
+        replyPreview.setBounds(10, 420, 340, 30);
+        replyPreview.setVisible(false);
+        add(replyPreview);
+
+        cancelReplyBtn.setBounds(350, 420, 40, 30);
+        cancelReplyBtn.setVisible(false);
+        cancelReplyBtn.addActionListener(event -> clearReplyTarget());
+        add(cancelReplyBtn);
+
+        // 화살표에 기록된 message_id를 클릭해 답장 대상을 선택한다.
+        chatPane.addMouseListener(new MouseAdapter() {
+            @Override
+            public void mouseClicked(MouseEvent event) {
+                int offset = chatPane.viewToModel2D(event.getPoint());
+                StyledDocument document = chatPane.getStyledDocument();
+                if (offset < 0 || offset >= document.getLength()) return;
+
+                AttributeSet attributes = document
+                        .getCharacterElement(offset).getAttributes();
+                Object id = attributes.getAttribute(REPLY_ID_ATTRIBUTE);
+                if (!(id instanceof Long messageId)) return;
+
+                replyTargetId = messageId;
+                String sender = (String) attributes
+                        .getAttribute(REPLY_SENDER_ATTRIBUTE);
+                String original = (String) attributes
+                        .getAttribute(REPLY_TEXT_ATTRIBUTE);
+                replyPreview.setText("↳ " + sender + ": " + oneLine(original));
+                replyPreview.setVisible(true);
+                cancelReplyBtn.setVisible(true);
+                msgTextF.requestFocusInWindow();
+            }
+        });
 
         // 새로 연 채팅방은 저장된 화면 설정을 처음부터 적용한다.
         applyAppearance(ChatAppearance.load());
@@ -492,6 +538,75 @@ public class ChatPanel extends JPanel implements ActionListener {
         }
     }
 
+    private static String oneLine(String text) {
+        String line = text.replace('\r', ' ').replace('\n', ' ').trim();
+        return line.length() > 55 ? line.substring(0, 55) + "…" : line;
+    }
+
+    private void clearReplyTarget() {
+        replyTargetId = 0;
+        replyPreview.setText("");
+        replyPreview.setVisible(false);
+        cancelReplyBtn.setVisible(false);
+    }
+
+    private SimpleAttributeSet replyAttributes(
+            long messageId, String senderName, String originalText) {
+        SimpleAttributeSet attributes = new SimpleAttributeSet();
+        attributes.addAttribute(REPLY_ID_ATTRIBUTE, messageId);
+        attributes.addAttribute(REPLY_SENDER_ATTRIBUTE, senderName);
+        attributes.addAttribute(REPLY_TEXT_ATTRIBUTE, originalText);
+        StyleConstants.setBold(attributes, true);
+        return attributes;
+    }
+
+    private void appendReplyArrow(
+            long messageId, String senderName, String originalText) {
+        try {
+            StyledDocument document = chatPane.getStyledDocument();
+            document.insertString(document.getLength(), " ↩",
+                    replyAttributes(messageId, senderName, originalText));
+            document.insertString(document.getLength(), "\n", null);
+            chatPane.setCaretPosition(document.getLength());
+        } catch (BadLocationException exception) {
+            throw new IllegalStateException("답장 화살표 표시 실패", exception);
+        }
+    }
+
+    // 발신자도 저장된 ID를 받은 뒤 화면에 한 번만 표시한다.
+    public void addStoredChat(
+            long messageId, String senderLoginId,
+            String senderName, String text) {
+        if (!historyLoaded) return;
+        boolean mine = Application.me != null
+                && Application.me.getId().equals(senderLoginId);
+        appendText(mine
+                ? "내가 보낸 메시지: " + text
+                : "[" + senderName + "] 님이 보낸 메시지: " + text);
+        appendReplyArrow(messageId, mine ? "나" : senderName, text);
+    }
+
+    public void addReplyNotice(
+            long messageId, String senderName,
+            String originalSender, String originalPreview,
+            String replyText) {
+        if (!historyLoaded) return;
+        boolean mine = Application.me != null
+                && Application.me.getName().equals(senderName);
+        appendText("↳ " + originalSender + ": "
+                + oneLine(originalPreview) + "\n");
+        appendText(mine
+                ? "내가 보낸 답장: " + replyText
+                : "[" + senderName + "] 님의 답장: " + replyText);
+        appendReplyArrow(messageId, mine ? "나" : senderName, replyText);
+    }
+
+    public void replySaved() {
+        // REPLY_NOTICE가 화면을 갱신하므로 입력 상태만 정리한다.
+        msgTextF.setText("");
+        clearReplyTarget();
+    }
+
     public void beginHistory() {
         historyItems.clear();
         historyLoaded = false;
@@ -589,6 +704,7 @@ public class ChatPanel extends JPanel implements ActionListener {
 	                prependText(prefix
 	                        + "[파일 정보를 표시하지 못했습니다.]\n");
 	            }
+	            
 	            break;
 	        }
 	        
@@ -601,13 +717,38 @@ public class ChatPanel extends JPanel implements ActionListener {
                         item.content());
                 break;
 
-            case CHAT:
-                prependText(prefix
+            case CHAT: {
+                String line = prefix
                         + (mine ? "내가 보낸 메시지: "
                                 : "[" + item.senderName()
                                   + "] 님이 보낸 메시지: ")
-                        + item.content() + "\n");
+                        + item.content();
+                try {
+                    StyledDocument document = chatPane.getStyledDocument();
+                    // 이전 기록은 문서 앞에 넣으므로 뒤에서부터 삽입한다.
+                    document.insertString(0, "\n", null);
+                    document.insertString(0, " ↩",
+                            replyAttributes(item.messageId(),
+                                    mine ? "나" : item.senderName(),
+                                    item.content()));
+                    document.insertString(0, line, null);
+                } catch (BadLocationException exception) {
+                    throw new IllegalStateException(
+                            "답장 화살표 표시 실패", exception);
+                }
+
+                // 기록을 앞에 쌓으므로 답장 본문 뒤에 원문을 삽입하면
+                // 화면에서는 원문이 답장 바로 위에 보인다.
+                if (item.replyToMessageId() != null) {
+                    String original = item.originalSenderName().isBlank()
+                            ? "원문" : item.originalSenderName();
+                    String preview = item.originalPreview().isBlank()
+                            ? "원문을 찾을 수 없습니다."
+                            : oneLine(item.originalPreview());
+                    prependText("↳ " + original + ": " + preview + "\n");
+                }
                 break;
+            }
 
             case WHISPER:
                 prependText(prefix
@@ -803,20 +944,29 @@ public class ChatPanel extends JPanel implements ActionListener {
         String message = msgTextF.getText();
 
         if (!message.isEmpty()) {
-            boolean sent = Application.sender.sendMessage(
-                    new MessageRequest(
-                            MessageType.CHAT,
-                            chatRoomName,
-                            Application.me.getName(),
-                            message));
-
-            if (sent) {
-                appendText("내가 보낸 메시지: " + message + "\n");
-                msgTextF.setText("");
+            boolean sent;
+            if (replyTargetId > 0) {
+                // 선택한 원문 ID를 서버에 전달해 답장으로 저장한다.
+                sent = Application.sender.sendMessage(
+                        new ReplyMessageRequest(
+                                chatRoomName, replyTargetId, message));
             } else {
+                sent = Application.sender.sendMessage(
+                        new MessageRequest(
+                                MessageType.CHAT,
+                                chatRoomName,
+                                Application.me.getName(),
+                                message));
+            }
+
+            if (!sent) {
                 JOptionPane.showMessageDialog(
                         frame, "메시지를 전송하지 못했습니다.");
+            } else if (replyTargetId == 0) {
+                // 일반 채팅은 STORED_CHAT을 받은 뒤 한 번만 표시한다.
+                msgTextF.setText("");
             }
+            // 답장은 REPLY_RESULT:OK를 받은 뒤 입력창을 비운다.
         }
     }
 

@@ -10,7 +10,7 @@ import java.sql.Types;
 
 public class ChatMessageDao {
 
-    public void save(
+    public long save(
             String roomName,
             int senderUserId,
             Integer recipientUserId,
@@ -53,8 +53,8 @@ public class ChatMessageDao {
                 """;
 
         try (Connection connection = DBConnection.getConnection();
-             PreparedStatement statement =
-                     connection.prepareStatement(sql)) {
+        	     PreparedStatement statement = connection.prepareStatement(
+        	             sql, java.sql.Statement.RETURN_GENERATED_KEYS)) {
 
             statement.setInt(1, senderUserId);
 
@@ -72,6 +72,14 @@ public class ChatMessageDao {
             if (statement.executeUpdate() != 1) {
                 throw new SQLException(
                         "채팅방 또는 발신자의 참여 기록을 찾지 못했습니다.");
+            }
+            
+            // 답장 화살표가 참조할 DB message_id를 반환한다.
+            try (java.sql.ResultSet keys = statement.getGeneratedKeys()) {
+                if (!keys.next()) {
+                    throw new SQLException("저장된 메시지 ID를 받지 못했습니다.");
+                }
+                return keys.getLong(1);
             }
         }
     }
