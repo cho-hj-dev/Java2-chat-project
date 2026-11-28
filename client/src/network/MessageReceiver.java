@@ -491,9 +491,9 @@ public class MessageReceiver extends Thread {
             }
 
             case STORED_CHAT: {
-                // 저장된 일반 메시지를 ID와 함께 양쪽 화면에 전달한다.
-                String[] values = message.split(",", 5);
-                if (values.length != 5) break;
+                // 마지막 값은 이 응답을 받는 회원의 멘션 여부다.
+                String[] values = message.split(",", 6);
+                if (values.length != 6) break;
                 ChatPanel panel = Application.chatPanelMap.get(
                         decodeReplyField(values[0]));
                 if (panel != null) {
@@ -501,15 +501,17 @@ public class MessageReceiver extends Thread {
                             Long.parseLong(values[1]),
                             decodeReplyField(values[2]),
                             decodeReplyField(values[3]),
-                            decodeReplyField(values[4]));
+                            decodeReplyField(values[4]),
+                            Boolean.parseBoolean(values[5]));
                 }
                 break;
             }
 
             case REPLY_NOTICE: {
-                // 방, 새 ID, 원문 ID, 답장 발신자, 원문 발신자, 원문 미리보기, 답장
-                String[] values = message.split(",", 7);
-                if (values.length != 7) break;
+                // 방, 새 ID, 원문 ID, 답장 발신자, 원문 발신자,
+                // 원문 미리보기, 답장, 이 회원의 멘션 여부
+                String[] values = message.split(",", 8);
+                if (values.length != 8) break;
                 ChatPanel panel = Application.chatPanelMap.get(
                         decodeReplyField(values[0]));
                 if (panel != null) {
@@ -518,7 +520,8 @@ public class MessageReceiver extends Thread {
                             decodeReplyField(values[3]),
                             decodeReplyField(values[4]),
                             decodeReplyField(values[5]),
-                            decodeReplyField(values[6]));
+                            decodeReplyField(values[6]),
+                            Boolean.parseBoolean(values[7]));
                 }
                 break;
             }

@@ -20,8 +20,11 @@ import view.style.EmoticonIcons;
 import java.awt.Color;
 import java.awt.Font;
 import java.awt.Image;
+import java.awt.Dimension;
 import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
+import java.awt.event.KeyAdapter;
+import java.awt.event.KeyEvent;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.awt.image.BufferedImage;
@@ -34,14 +37,18 @@ import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
 import java.util.LinkedHashMap;
+import java.util.Locale;
 import java.util.Map;
 
 import javax.imageio.ImageIO;
 import javax.swing.ImageIcon;
 import javax.swing.JButton;
+import javax.swing.DefaultListCellRenderer;
+import javax.swing.DefaultListModel;
 import javax.swing.JFileChooser;
 import javax.swing.JFrame;
 import javax.swing.JLabel;
+import javax.swing.JList;
 import javax.swing.JMenuItem;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
@@ -49,6 +56,10 @@ import javax.swing.JPopupMenu;
 import javax.swing.JScrollPane;
 import javax.swing.JTextField;
 import javax.swing.JTextPane;
+import javax.swing.ListSelectionModel;
+import javax.swing.SwingUtilities;
+import javax.swing.event.DocumentEvent;
+import javax.swing.event.DocumentListener;
 import javax.swing.text.BadLocationException;
 import javax.swing.text.AttributeSet;
 import javax.swing.text.SimpleAttributeSet;
@@ -64,6 +75,7 @@ public class ChatPanel extends JPanel implements ActionListener {
     private static final String REPLY_ID_ATTRIBUTE = "replyMessageId";
     private static final String REPLY_SENDER_ATTRIBUTE = "replySender";
     private static final String REPLY_TEXT_ATTRIBUTE = "replyText";
+    private static final String MENTION_MARKER = "mentionedMe";
     private static final DateTimeFormatter HISTORY_TIME_FORMAT =
             DateTimeFormatter.ofPattern("MM-dd HH:mm");
 
@@ -90,6 +102,13 @@ public class ChatPanel extends JPanel implements ActionListener {
     // JTextPane은 텍스트와 그림을 한 채팅 영역에 표시할 수 있다.
     private final JTextPane chatPane = new JTextPane();
     private final JTextField msgTextF = new JTextField(50);
+    private final JPopupMenu mentionPopup = new JPopupMenu();
+    private final DefaultListModel<User> mentionChoices =
+            new DefaultListModel<>();
+    private final JList<User> mentionList = new JList<>(mentionChoices);
+    private JScrollPane mentionScroll;
+    private int activeMentionAt = -1;
+    private boolean insertingMention;
     private final JLabel replyPreview = new JLabel();
     private final JButton cancelReplyBtn = new JButton("×");
     private long replyTargetId;
@@ -199,6 +218,7 @@ public class ChatPanel extends JPanel implements ActionListener {
 
         msgTextF.setBounds(10, 460, 150, 35);
         add(msgTextF);
+        installMentionSuggestions();
 
         sendBtn.setBounds(165, 460, 65, 35);
         sendBtn.addActionListener(this);
@@ -216,6 +236,161 @@ public class ChatPanel extends JPanel implements ActionListener {
         // 이전 대화 수신이 끝나기 전에는 새 메시지를 보내지 않는다.
         setComposerEnabled(false);
         frame.add(this);
+    }
+
+    private void installMentionSuggestions() {
+        mentionList.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
+        mentionList.setFocusable(false);
+        mentionList.setCellRenderer((list, user, index, selected, focus) -> {
+            JLabel label = (JLabel) new DefaultListCellRenderer()
+                    .getListCellRendererComponent(
+                            list, user, index, selected, focus);
+            // 목록에는 현재 방 사용자의 닉네임을 보여준다.
+            boolean mine = Application.me != null
+                    && Application.me.getId().equals(user.getId());
+            label.setText(user.getName() + (mine ? " (나)" : ""));
+            return label;
+        });
+        mentionList.addMouseListener(new MouseAdapter() {
+            @Override
+            public void mouseClicked(MouseEvent event) {
+                chooseMention();
+            }
+        });
+
+        mentionScroll = new JScrollPane(mentionList);
+        mentionScroll.setPreferredSize(new Dimension(230, 120));
+        mentionPopup.setFocusable(false);
+        mentionPopup.add(mentionScroll);
+
+        // 문서 변경 알림 중에는 caret 위치가 아직 이전 값일 수 있어
+        // 이벤트가 끝난 뒤 후보 목록을 갱신한다.
+        msgTextF.getDocument().addDocumentListener(new DocumentListener() {
+            @Override
+            public void insertUpdate(DocumentEvent event) {
+                SwingUtilities.invokeLater(
+                        ChatPanel.this::updateMentionSuggestions);
+            }
+
+            @Override
+            public void removeUpdate(DocumentEvent event) {
+                SwingUtilities.invokeLater(
+                        ChatPanel.this::updateMentionSuggestions);
+            }
+
+            @Override
+            public void changedUpdate(DocumentEvent event) {
+                SwingUtilities.invokeLater(
+                        ChatPanel.this::updateMentionSuggestions);
+            }
+        });
+        msgTextF.addCaretListener(event ->
+                SwingUtilities.invokeLater(
+                        this::updateMentionSuggestions));
+
+        msgTextF.addKeyListener(new KeyAdapter() {
+            @Override
+            public void keyPressed(KeyEvent event) {
+                if (!mentionPopup.isVisible()) return;
+                int key = event.getKeyCode();
+                if (key == KeyEvent.VK_DOWN || key == KeyEvent.VK_UP) {
+                    int direction = key == KeyEvent.VK_DOWN ? 1 : -1;
+                    int next = Math.max(0, Math.min(
+                            mentionChoices.size() - 1,
+                            mentionList.getSelectedIndex() + direction));
+                    mentionList.setSelectedIndex(next);
+                    mentionList.ensureIndexIsVisible(next);
+                    event.consume();
+                } else if (key == KeyEvent.VK_ENTER) {
+                    chooseMention();
+                    event.consume();
+                } else if (key == KeyEvent.VK_ESCAPE) {
+                    hideMentionSuggestions();
+                    event.consume();
+                }
+            }
+        });
+    }
+
+    private void updateMentionSuggestions() {
+        if (insertingMention || connectionClosed
+                || !msgTextF.isShowing() || !msgTextF.isEnabled()) {
+            hideMentionSuggestions();
+            return;
+        }
+
+        String text = msgTextF.getText();
+        int caret = msgTextF.getCaretPosition();
+        int at = caret > 0 ? text.lastIndexOf('@', caret - 1) : -1;
+
+        // 이메일 주소의 @ 또는 이미 끝난 멘션에는 목록을 띄우지 않는다.
+        if (at < 0 || (at > 0 && isMentionNamePart(text.charAt(at - 1)))) {
+            hideMentionSuggestions();
+            return;
+        }
+        String typed = text.substring(at + 1, caret);
+        if (typed.indexOf('@') >= 0 || typed.length() > 50) {
+            hideMentionSuggestions();
+            return;
+        }
+
+        String filter = typed.toLowerCase(Locale.ROOT);
+        mentionChoices.clear();
+        for (User user : roomUsers) {
+            if (user.getName().toLowerCase(Locale.ROOT).startsWith(filter)
+                    || user.getId().toLowerCase(Locale.ROOT)
+                            .startsWith(filter)) {
+                mentionChoices.addElement(user);
+            }
+        }
+        if (mentionChoices.isEmpty()) {
+            hideMentionSuggestions();
+            return;
+        }
+
+        activeMentionAt = at;
+        mentionList.setSelectedIndex(0);
+        int height = Math.min(6, mentionChoices.size()) * 26 + 6;
+        mentionScroll.setPreferredSize(new Dimension(230, height));
+        mentionPopup.pack();
+        // 채팅 입력창 위에 사진과 같은 후보 목록을 표시한다.
+        mentionPopup.show(msgTextF, 0, -height);
+    }
+
+    private static boolean isMentionNamePart(char character) {
+        return Character.isLetterOrDigit(character) || character == '_';
+    }
+
+    private void chooseMention() {
+        User selected = mentionList.getSelectedValue();
+        if (selected == null || activeMentionAt < 0) return;
+
+        String text = msgTextF.getText();
+        int caret = msgTextF.getCaretPosition();
+        if (activeMentionAt >= caret
+                || text.charAt(activeMentionAt) != '@') {
+            hideMentionSuggestions();
+            return;
+        }
+
+        // 커서 앞에서 작성 중이던 @검색어만 닉네임으로 교체한다.
+        String replacement = "@" + selected.getName() + " ";
+        insertingMention = true;
+        try {
+            msgTextF.setText(text.substring(0, activeMentionAt)
+                    + replacement + text.substring(caret));
+            msgTextF.setCaretPosition(
+                    activeMentionAt + replacement.length());
+        } finally {
+            insertingMention = false;
+        }
+        hideMentionSuggestions();
+        msgTextF.requestFocusInWindow();
+    }
+
+    private void hideMentionSuggestions() {
+        mentionPopup.setVisible(false);
+        activeMentionAt = -1;
     }
 
     private void chooseFile() {
@@ -474,6 +649,19 @@ public class ChatPanel extends JPanel implements ActionListener {
         document.setCharacterAttributes(
                 0, document.getLength(), attributes, false);
 
+        // 화면 설정을 바꾼 뒤에도 멘션 메시지의 강조색을 유지한다.
+        int offset = 0;
+        while (offset < document.getLength()) {
+            javax.swing.text.Element element =
+                    document.getCharacterElement(offset);
+            int end = Math.min(element.getEndOffset(), document.getLength());
+            if (Boolean.TRUE.equals(
+                    element.getAttributes().getAttribute(MENTION_MARKER))) {
+                applyMentionHighlight(offset, end - offset);
+            }
+            offset = end;
+        }
+
         chatPane.repaint();
     }
 
@@ -573,24 +761,44 @@ public class ChatPanel extends JPanel implements ActionListener {
         }
     }
 
+    // 본인을 멘션한 메시지만 노란 배경과 검은 글씨로 강조한다.
+    // 기존 답장 화살표 속성은 replace=false로 보존한다.
+    private void applyMentionHighlight(int start, int length) {
+        if (length <= 0) return;
+        SimpleAttributeSet attributes = new SimpleAttributeSet();
+        attributes.addAttribute(MENTION_MARKER, Boolean.TRUE);
+        StyleConstants.setBackground(
+                attributes, new Color(255, 235, 130));
+        StyleConstants.setForeground(attributes, Color.BLACK);
+        StyleConstants.setBold(attributes, true);
+        chatPane.getStyledDocument().setCharacterAttributes(
+                start, length, attributes, false);
+    }
+
     // 발신자도 저장된 ID를 받은 뒤 화면에 한 번만 표시한다.
     public void addStoredChat(
             long messageId, String senderLoginId,
-            String senderName, String text) {
+            String senderName, String text, boolean mentionedMe) {
         if (!historyLoaded) return;
+        int start = chatPane.getStyledDocument().getLength();
         boolean mine = Application.me != null
                 && Application.me.getId().equals(senderLoginId);
         appendText(mine
                 ? "내가 보낸 메시지: " + text
                 : "[" + senderName + "] 님이 보낸 메시지: " + text);
         appendReplyArrow(messageId, mine ? "나" : senderName, text);
+        if (mentionedMe) {
+            applyMentionHighlight(start,
+                    chatPane.getStyledDocument().getLength() - start);
+        }
     }
 
     public void addReplyNotice(
             long messageId, String senderName,
             String originalSender, String originalPreview,
-            String replyText) {
+            String replyText, boolean mentionedMe) {
         if (!historyLoaded) return;
+        int start = chatPane.getStyledDocument().getLength();
         boolean mine = Application.me != null
                 && Application.me.getName().equals(senderName);
         appendText("↳ " + originalSender + ": "
@@ -599,6 +807,10 @@ public class ChatPanel extends JPanel implements ActionListener {
                 ? "내가 보낸 답장: " + replyText
                 : "[" + senderName + "] 님의 답장: " + replyText);
         appendReplyArrow(messageId, mine ? "나" : senderName, replyText);
+        if (mentionedMe) {
+            applyMentionHighlight(start,
+                    chatPane.getStyledDocument().getLength() - start);
+        }
     }
 
     public void replySaved() {
@@ -718,6 +930,7 @@ public class ChatPanel extends JPanel implements ActionListener {
                 break;
 
             case CHAT: {
+                int oldLength = chatPane.getStyledDocument().getLength();
                 String line = prefix
                         + (mine ? "내가 보낸 메시지: "
                                 : "[" + item.senderName()
@@ -746,6 +959,11 @@ public class ChatPanel extends JPanel implements ActionListener {
                             ? "원문을 찾을 수 없습니다."
                             : oneLine(item.originalPreview());
                     prependText("↳ " + original + ": " + preview + "\n");
+                }
+                if (item.mentionedMe()) {
+                    applyMentionHighlight(0,
+                            chatPane.getStyledDocument().getLength()
+                                    - oldLength);
                 }
                 break;
             }
@@ -850,6 +1068,10 @@ public class ChatPanel extends JPanel implements ActionListener {
     public void setRoomUsers(List<User> users) {
         // 화면의 대상 선택에 사용할 목록을 복사해 보관한다.
         roomUsers = new ArrayList<>(users);
+        // 사용자가 입장하거나 퇴장하면 열린 후보 목록도 다시 계산한다.
+        if (mentionPopup.isVisible()) {
+            SwingUtilities.invokeLater(this::updateMentionSuggestions);
+        }
     }
 
     public List<User> getRoomUsers() {

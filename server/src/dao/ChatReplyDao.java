@@ -8,6 +8,7 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.Optional;
+import java.util.Set;
 
 public class ChatReplyDao {
 
@@ -100,6 +101,18 @@ public class ChatReplyDao {
             long targetMessageId,
             String replyText
     ) throws SQLException {
+        return saveReply(roomName, senderUserId,
+                targetMessageId, replyText, Set.of());
+    }
+
+    // 답장 내용과 멘션 대상은 함께 성공하거나 함께 취소한다.
+    public long saveReply(
+            String roomName,
+            int senderUserId,
+            long targetMessageId,
+            String replyText,
+            Set<Integer> mentionedUserIds
+    ) throws SQLException {
 
         validateRequest(roomName, senderUserId, targetMessageId);
 
@@ -133,28 +146,41 @@ public class ChatReplyDao {
                   )
                 """;
 
-        try (Connection connection = DBConnection.getConnection();
-             PreparedStatement statement =
-                     connection.prepareStatement(
-                             sql, Statement.RETURN_GENERATED_KEYS)) {
+        try (Connection connection = DBConnection.getConnection()) {
+            connection.setAutoCommit(false);
+            try {
+                long messageId;
+                try (PreparedStatement statement =
+                        connection.prepareStatement(
+                                sql, Statement.RETURN_GENERATED_KEYS)) {
 
-            statement.setInt(1, senderUserId);
-            statement.setString(2, replyText);
-            statement.setLong(3, targetMessageId);
-            statement.setString(4, roomName);
-            statement.setInt(5, senderUserId);
+                    statement.setInt(1, senderUserId);
+                    statement.setString(2, replyText);
+                    statement.setLong(3, targetMessageId);
+                    statement.setString(4, roomName);
+                    statement.setInt(5, senderUserId);
 
-            if (statement.executeUpdate() != 1) {
-                throw new SQLException(
-                        "답장 대상이 없거나 이 방에 참여하지 않았습니다.");
-            }
+                    if (statement.executeUpdate() != 1) {
+                        throw new SQLException(
+                                "답장 대상이 없거나 이 방에 참여하지 않았습니다.");
+                    }
 
-            try (ResultSet keys = statement.getGeneratedKeys()) {
-                if (!keys.next()) {
-                    throw new SQLException(
-                            "저장된 답장 ID를 확인하지 못했습니다.");
+                    try (ResultSet keys = statement.getGeneratedKeys()) {
+                        if (!keys.next()) {
+                            throw new SQLException(
+                                    "저장된 답장 ID를 확인하지 못했습니다.");
+                        }
+                        messageId = keys.getLong(1);
+                    }
                 }
-                return keys.getLong(1);
+
+                new ChatMentionDao().insert(connection, messageId,
+                        roomName, mentionedUserIds);
+                connection.commit();
+                return messageId;
+            } catch (SQLException | RuntimeException exception) {
+                connection.rollback();
+                throw exception;
             }
         }
     }
