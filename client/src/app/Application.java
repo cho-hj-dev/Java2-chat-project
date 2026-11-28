@@ -32,6 +32,7 @@ public class Application {
     
     public static SignupFrame signupFrame;
     public static view.frame.ProfileFrame profileFrame;
+    public static view.frame.PublicProfileFrame publicProfileFrame;
     public static view.frame.ResetPasswordFrame resetPasswordFrame;
 
     public static User me;

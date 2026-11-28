@@ -57,6 +57,8 @@ public enum DtoType {
 	
 	PROFILE_GET, // 내 프로필 조회 요청
 	PROFILE_RESULT, // 프로필 조회 결과 응답
+	PUBLIC_PROFILE_GET, // 상대 공개 프로필 조회
+	PUBLIC_PROFILE_RESULT,
 	
 	PROFILE_UPDATE,
 	PROFILE_UPDATE_RESULT,

@@ -25,6 +25,9 @@ public class MessageSender {
             PrintWriter writer = new PrintWriter(socket.getOutputStream(), true);
 
             switch (type) {
+	            case PUBLIC_PROFILE_GET:
+	                writer.println((PublicProfileRequest) dto);
+	                break;
 	            case REPLY_MESSAGE:
 	                writer.println((ReplyMessageRequest) dto);
 	                break;

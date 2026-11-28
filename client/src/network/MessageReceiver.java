@@ -90,6 +90,9 @@ public class MessageReceiver extends Thread {
                 if (Application.profileFrame != null) {
                     Application.profileFrame.profileConnectionFailed();
                 }
+                if (Application.publicProfileFrame != null) {
+                    Application.publicProfileFrame.connectionFailed();
+                }
                 if (Application.signupFrame != null) {
                     Application.signupFrame.showSignupResult("ERROR");
                 }
@@ -351,6 +354,13 @@ public class MessageReceiver extends Thread {
 	            }
 	            break;
 	        }
+
+            case PUBLIC_PROFILE_RESULT: {
+                if (Application.publicProfileFrame != null) {
+                    Application.publicProfileFrame.showProfileResult(message);
+                }
+                break;
+            }
 	        
             case LOGIN_RESULT: {
                 String[] result = message.split(",", -1);
