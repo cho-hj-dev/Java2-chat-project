@@ -7,6 +7,9 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.SQLException;
 import java.sql.Types;
+import java.sql.Statement;
+import java.sql.ResultSet;
+import java.util.Set;
 
 public class ChatMessageDao {
 
@@ -16,6 +19,18 @@ public class ChatMessageDao {
             Integer recipientUserId,
             MessageType type,
             String content) throws SQLException {
+        return save(roomName, senderUserId, recipientUserId,
+                type, content, Set.of());
+    }
+
+    // 일반 채팅과 확인된 멘션 대상은 한 트랜잭션에서 함께 저장한다.
+    public long save(
+            String roomName,
+            int senderUserId,
+            Integer recipientUserId,
+            MessageType type,
+            String content,
+            Set<Integer> mentionedUserIds) throws SQLException {
 
         if (type == MessageType.WHISPER
                 && recipientUserId == null) {
@@ -52,34 +67,44 @@ public class ChatMessageDao {
                   )
                 """;
 
-        try (Connection connection = DBConnection.getConnection();
-        	     PreparedStatement statement = connection.prepareStatement(
-        	             sql, java.sql.Statement.RETURN_GENERATED_KEYS)) {
+        try (Connection connection = DBConnection.getConnection()) {
+            connection.setAutoCommit(false);
+            try {
+                long messageId;
+                try (PreparedStatement statement = connection.prepareStatement(
+                        sql, Statement.RETURN_GENERATED_KEYS)) {
 
-            statement.setInt(1, senderUserId);
+                    statement.setInt(1, senderUserId);
+                    if (recipientUserId == null) {
+                        statement.setNull(2, Types.INTEGER);
+                    } else {
+                        statement.setInt(2, recipientUserId);
+                    }
+                    statement.setString(3, type.name());
+                    statement.setString(4, content);
+                    statement.setString(5, roomName);
+                    statement.setInt(6, senderUserId);
 
-            if (recipientUserId == null) {
-                statement.setNull(2, Types.INTEGER);
-            } else {
-                statement.setInt(2, recipientUserId);
-            }
-
-            statement.setString(3, type.name());
-            statement.setString(4, content);
-            statement.setString(5, roomName);
-            statement.setInt(6, senderUserId);
-
-            if (statement.executeUpdate() != 1) {
-                throw new SQLException(
-                        "채팅방 또는 발신자의 참여 기록을 찾지 못했습니다.");
-            }
-            
-            // 답장 화살표가 참조할 DB message_id를 반환한다.
-            try (java.sql.ResultSet keys = statement.getGeneratedKeys()) {
-                if (!keys.next()) {
-                    throw new SQLException("저장된 메시지 ID를 받지 못했습니다.");
+                    if (statement.executeUpdate() != 1) {
+                        throw new SQLException(
+                                "채팅방 또는 발신자의 참여 기록을 찾지 못했습니다.");
+                    }
+                    try (ResultSet keys = statement.getGeneratedKeys()) {
+                        if (!keys.next()) {
+                            throw new SQLException(
+                                    "저장된 메시지 ID를 받지 못했습니다.");
+                        }
+                        messageId = keys.getLong(1);
+                    }
                 }
-                return keys.getLong(1);
+
+                new ChatMentionDao().insert(connection, messageId,
+                        roomName, mentionedUserIds);
+                connection.commit();
+                return messageId;
+            } catch (SQLException | RuntimeException exception) {
+                connection.rollback();
+                throw exception;
             }
         }
     }

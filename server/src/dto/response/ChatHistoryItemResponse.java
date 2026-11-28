@@ -20,6 +20,7 @@ public class ChatHistoryItemResponse extends DTO {
     private final Long replyToMessageId;
     private final String originalSenderName;
     private final String originalPreview;
+    private final boolean mentionedMe;
 
     public ChatHistoryItemResponse(
             String roomName,
@@ -32,7 +33,8 @@ public class ChatHistoryItemResponse extends DTO {
             LocalDateTime sentAt,
             Long replyToMessageId,
             String originalSenderName,
-            String originalPreview) {
+            String originalPreview,
+            boolean mentionedMe) {
 
         super(DtoType.CHAT_HISTORY_ITEM);
         this.roomName = roomName;
@@ -46,6 +48,7 @@ public class ChatHistoryItemResponse extends DTO {
         this.replyToMessageId = replyToMessageId;
         this.originalSenderName = originalSenderName;
         this.originalPreview = originalPreview;
+        this.mentionedMe = mentionedMe;
     }
 
     @Override
@@ -65,7 +68,8 @@ public class ChatHistoryItemResponse extends DTO {
                 + encode(content) + ","
                 + (replyToMessageId == null ? "" : replyToMessageId) + ","
                 + encode(originalSenderName == null ? "" : originalSenderName) + ","
-                + encode(originalPreview == null ? "" : originalPreview);
+                + encode(originalPreview == null ? "" : originalPreview) + ","
+                + mentionedMe;
                 
     }
 

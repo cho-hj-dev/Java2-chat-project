@@ -38,6 +38,7 @@ import service.SignupEmailService;
 import java.sql.Connection;
 
 import service.WeatherService;
+import service.MentionService;
 
 import service.ScheduleService;
 
@@ -60,6 +61,7 @@ public class ServerThread extends Thread {
     ChatService chatService;
     private User loggedInUser;
     private final ChatMessageDao chatMessageDao = new ChatMessageDao();
+    private final MentionService mentionService = new MentionService();
     private final ChatHistoryDao chatHistoryDao = new ChatHistoryDao();
     private final ChatSearchDao chatSearchDao = new ChatSearchDao();
     private final ImageGalleryDao imageGalleryDao = new ImageGalleryDao();
@@ -589,6 +591,15 @@ public class ServerThread extends Thread {
 	                 break;
 	             }
 		
+	             // 현재 이 방에 입장한 회원의 닉네임과 로그인 ID만
+	             // 멘션 대상으로 인정한다. 클라이언트가 대상 ID를 지정하지 않는다.
+	             Set<Integer> mentionedUserIds =
+	                     received.getMessageType() == MessageType.CHAT
+	                     ? mentionService.findTargets(
+	                             received.getMessage(),
+	                             new java.util.ArrayList<>(targetRoom.getUsers()))
+	                     : Set.of();
+
 	             long savedMessageId;
 	             try {
 	                 savedMessageId = chatMessageDao.save(
@@ -596,7 +607,8 @@ public class ServerThread extends Thread {
 	                         loggedInUser.getMemberId(),
 	                         null,
 	                         received.getMessageType(),
-	                         received.getMessage());
+	                         received.getMessage(),
+	                         mentionedUserIds);
 	             } catch (SQLException | IllegalArgumentException exception) {
 	                 System.err.println("메시지 저장 실패: "
 	                         + exception.getClass().getSimpleName());
@@ -616,7 +628,12 @@ public class ServerThread extends Thread {
 
 	            	    for (User roomUser :
 	            	            new java.util.ArrayList<>(targetRoom.getUsers())) {
-	            	        writeResponse(roomUser.getSocket(), storedChat);
+                        // 보낸 사람은 제외하고 실제 멘션된 상대방만 강조한다.
+	            	        writeResponse(roomUser.getSocket(),
+                                storedChat + ","
+                                + (roomUser != loggedInUser
+                                    && mentionedUserIds.contains(
+                                            roomUser.getMemberId())));
 	            	    }
 	            	} else {
 	            	    MessageResponse outgoing = new MessageResponse(
@@ -627,6 +644,8 @@ public class ServerThread extends Thread {
 	            	    sendMessage(outgoing);
 	            	}
                 }
+                // MESSAGE 처리가 끝나면 다음 CREATE_CHAT 분기로 진행하지 않는다.
+                break;
             }
                 
             case CREATE_CHAT: {
@@ -1243,13 +1262,19 @@ public class ServerThread extends Thread {
 
                 ChatReplyDao.ReplyTarget target = found.get();
 
+                Set<Integer> mentionedUserIds =
+                        mentionService.findTargets(
+                                request.getReplyText(),
+                                new java.util.ArrayList<>(room.getUsers()));
+
                 // 저장 시점에 같은 방·참여 여부를 DAO가 다시 검사한다.
                 // 반환값은 새로 저장된 답장 메시지의 ID다.
                 long newMessageId = chatReplyDao.saveReply(
                         request.getRoomName(),
                         loggedInUser.getMemberId(),
                         target.messageId(),
-                        request.getReplyText());
+                        request.getReplyText(),
+                        mentionedUserIds);
 
                 String encodedRoom =
                         encodeReplyField(request.getRoomName());
@@ -1275,7 +1300,11 @@ public class ServerThread extends Thread {
 
                 for (User user :
                         new java.util.ArrayList<>(room.getUsers())) {
-                    writeResponse(user.getSocket(), notice);
+                    writeResponse(user.getSocket(),
+                            notice + ","
+                            + (user != loggedInUser
+                                && mentionedUserIds.contains(
+                                        user.getMemberId())));
                 }
             }
 
@@ -1390,7 +1419,8 @@ public class ServerThread extends Thread {
                             item.sentAt(),
                             item.replyToMessageId(),
                             item.originalSenderName(),
-                            item.originalPreview()));
+                            item.originalPreview(),
+                            item.mentionedMe()));
                 }
             }
 

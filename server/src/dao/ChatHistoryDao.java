@@ -29,7 +29,8 @@ public class ChatHistoryDao {
             LocalDateTime sentAt,
             Long replyToMessageId,
             String originalSenderName,
-            String originalPreview) {
+            String originalPreview,
+            boolean mentionedMe) {
     }
 
     public List<StoredMessage> findRecent(
@@ -71,7 +72,14 @@ public class ChatHistoryDao {
                                    COALESCE(
                                        original_file.original_name,
                                        '파일'))
-                       END AS original_preview
+                       END AS original_preview,
+                       EXISTS (
+                           SELECT 1
+                           FROM chat_message_mentions mention
+                           WHERE mention.message_id = m.message_id
+                             AND mention.mentioned_user_id = ?
+                             AND m.sender_user_id <> ?
+                       ) AS mentioned_me
                 FROM chat_messages m
                 JOIN chat_rooms r
                     ON r.room_id = m.room_id
@@ -115,11 +123,15 @@ public class ChatHistoryDao {
              PreparedStatement statement =
                      connection.prepareStatement(sql)) {
 
-            statement.setString(1, roomName);
+            // 첫 번째 매개변수는 이 기록을 받는 회원의 멘션 여부다.
+            statement.setInt(1, viewerUserId);
+            // 보낸 사람은 본인을 멘션했더라도 강조하지 않는다.
             statement.setInt(2, viewerUserId);
-            statement.setInt(3, viewerUserId);
+            statement.setString(3, roomName);
             statement.setInt(4, viewerUserId);
-            statement.setInt(5, MAX_RECENT_MESSAGES);
+            statement.setInt(5, viewerUserId);
+            statement.setInt(6, viewerUserId);
+            statement.setInt(7, MAX_RECENT_MESSAGES);
 
             try (ResultSet result = statement.executeQuery()) {
                 while (result.next()) {
@@ -150,7 +162,8 @@ public class ChatHistoryDao {
                                     .toLocalDateTime(),
                             replyToMessageId,
                             result.getString("original_sender_name"),
-                            result.getString("original_preview")));
+                            result.getString("original_preview"),
+                            result.getBoolean("mentioned_me")));
                 }
             }
         }
